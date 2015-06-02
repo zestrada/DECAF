@@ -56,6 +56,7 @@ typedef enum {
         DECAF_TLB_EXEC_CB,
         DECAF_READ_TAINTMEM_CB,
         DECAF_WRITE_TAINTMEM_CB,
+        DECAF_VMCALL_CB,
 #ifdef CONFIG_TCG_LLVM
 	DECAF_BLOCK_TRANS_CB,
 #endif /* CONFIG_TCG_LLVM */

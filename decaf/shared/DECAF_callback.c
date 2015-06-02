@@ -1119,6 +1119,27 @@ PUSH_ALL()
 POP_ALL()
 }
 
+/*Copied from INSN_END callback*/
+void helper_DECAF_invoke_vmcall_callback(CPUState* env)
+{
+	static callback_struct_t *cb_struct, *cb_temp;
+        static DECAF_Callback_Params params;
+
+	if (env == 0) return;
+	params.ie.env = env;
+PUSH_ALL()
+	//FIXME: not thread safe
+	LIST_FOREACH_SAFE(cb_struct, &callback_list_heads[DECAF_VMCALL_CB], link,cb_temp) {
+		// If it is a global callback or it is within the execution context,
+		// invoke this callback
+	    params.cbhandle = (DECAF_Handle)cb_struct;
+		if(!cb_struct->enabled || *cb_struct->enabled)
+			cb_struct->callback(&params);
+	}
+POP_ALL()
+}
+
+
 #ifdef CONFIG_TCG_LLVM
 void helper_DECAF_invoke_block_trans_callback(
 	const struct TranslationBlock *tb,

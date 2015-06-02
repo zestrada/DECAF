@@ -7228,6 +7228,11 @@ static target_ulong disas_insn(DisasContext *s, target_ulong pc_start)
         mod = (modrm >> 6) & 3;
         op = (modrm >> 3) & 7;
         rm = modrm & 7;
+        if(modrm == 0xc1) { /*vmcall*/
+            if(DECAF_is_callback_needed(DECAF_VMCALL_CB))
+              gen_helper_DECAF_invoke_vmcall_callback(cpu_env);
+            break;
+        }
         switch(op) {
         case 0: /* sgdt */
             if (mod == 3)
