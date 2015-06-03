@@ -52,6 +52,7 @@ static DECAF_Handle keystroke_cb_handle;
 static DECAF_Handle removeproc_handle;
 static DECAF_Handle loadmainmodule_handle;
 static DECAF_Handle loadmodule_handle;
+static DECAF_Handle vmcall_handle;
 
 static DECAF_Handle check_eip_handle;
 
@@ -59,6 +60,10 @@ int io_logging_initialized = 0;
 
 char current_mod[32] = "";
 char current_proc[32] = "";
+
+//Args for vmcall to save
+Monitor *vmcall_mon;
+char vmcall_filename[512];
 
 /* Origin and offset set by the taint_sendkey monitor command */
 #ifdef CONFIG_TCG_TAINT
@@ -173,6 +178,8 @@ static void tracing_cleanup(void) {
 		DECAF_unregister_callback(DECAF_KEYSTROKE_CB, keystroke_cb_handle);
 	if (check_eip_handle)
 		DECAF_unregister_callback(DECAF_EIP_CHECK_CB, check_eip_handle);
+	if (vmcall_handle)
+		DECAF_unregister_callback(DECAF_VMCALL_CB, vmcall_handle);
 
 	DECAF_start_vm();
 }
@@ -229,6 +236,32 @@ void set_trace_kernel(Monitor *mon, const QDict *qdict) {
 	do_tracing_internal(-1, filename);
 
 }
+
+//FIXME: move to better location once working (also look at plugin_cmds.h)
+#define VMCALL_START 0
+#define VMCALL_STOP 1
+void vmcall_callback(DECAF_Callback_Params* params) {
+  int callnum = params->ie.env->regs[R_EAX];
+
+  if(callnum == VMCALL_START)  {
+    should_trace_all_kernel = 1;
+    do_tracing_internal(-1, vmcall_filename);
+  }
+  else if(callnum == VMCALL_STOP)
+    do_tracing_stop(NULL);
+  else
+    DECAF_printf("Unhandled vmcall!\n"); 
+}
+
+void set_vmcall_trace_kernel(Monitor *mon, const QDict *qdict) {
+	strcpy(vmcall_filename, qdict_get_str(qdict, "filepath"));
+  vmcall_mon = mon;
+	vmcall_handle = DECAF_register_callback(DECAF_VMCALL_CB, vmcall_callback, 
+                                          NULL);
+}
+
+
+
 void do_tracing_by_name(Monitor *mon, const QDict *qdict) {
 	do_tracing_by_name_internal(qdict_get_str(qdict, "name"),
 			qdict_get_str(qdict, "filepath"));
@@ -307,6 +340,7 @@ void tracing_insn_begin(DECAF_Callback_Params* params) {
 }
 
 void tracing_insn_end(DECAF_Callback_Params* params) {
+	int k, j;
 	CPUState * env;
 
 	/* If not decoding, return */
@@ -342,13 +376,14 @@ void tracing_insn_end(DECAF_Callback_Params* params) {
 	eh.eflags = compute_eflag();
 #else
 #define DF_MASK	0x00000400
+/* ZJE bug work around
 	eh.eflags = env->eflags | helper_cc_compute_all(env->cc_op) |
 		(env->df & DF_MASK);
+*/
 #endif // AWH
 	//for test
 //check taint value after insn is executed
 
-	int k, j;
 	for (k = 0; k < eh.num_operands; k++) {
 		if (eh.operand[k].length)
 			set_operand_data(&(eh.operand[k]), 0);

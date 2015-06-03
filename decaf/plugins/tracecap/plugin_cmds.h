@@ -85,6 +85,10 @@
 	.params		= "", 
 	.help		= "stop tracing current process(es)"
 },
-
-
-
+{
+	.name		= "vmcall_trace_kernel", 
+  .args_type      = "filepath:F",
+  .mhandler.cmd   = set_vmcall_trace_kernel,
+  .params         = "filepath",
+  .help           = "start kernel trace on vmcall 0, stop on 1, saving into the specified file"
+},

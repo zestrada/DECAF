@@ -175,9 +175,10 @@ void tracing_stop()
     double userProcessTime = (stopUT - startUT);
     double systemProcessTime = (stopST - startST);
     double processTime =  userProcessTime + systemProcessTime;
-
-    monitor_printf (default_mon, "Processing time: %g U: %g S: %g\n",
-      processTime, userProcessTime, systemProcessTime);
+    
+    /*//This caused a SEGFAULT and wasn't useful for me, so it's gone
+      monitor_printf(default_mon, "Processing time: %g U: %g S: %g\n",
+      processTime, userProcessTime, systemProcessTime);*/
   }
   else {
     monitor_printf(default_mon, "Could not get usage\n");
