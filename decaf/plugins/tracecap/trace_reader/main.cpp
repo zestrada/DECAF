@@ -120,6 +120,7 @@ string g_sInFile;
 // string g_sOutFile;
 bool g_bBAP;
 bool g_bSummary;
+bool g_bInsOnly;
 
 int
 process_arg(int argc, char **argv);
@@ -177,6 +178,23 @@ main(int argc, char **argv)
             cout << "(" << counter << ") " << tr.getInsnString();
         }
 
+        if (g_bInsOnly)
+        {
+            //ZJE: stolen from printInstruction
+            char line[LINE_SIZE];
+
+            cout << hex << insn.eh.address << ": ";
+
+            if (get_instruction_string(&(insn.insn), FORMAT_ATT, insn.eh.address, line, LINE_SIZE) != 0)
+            {
+              cout << line << "\n";
+            }
+            else
+            {
+              cout << "null\n";
+            }
+        }
+
         if (g_bSummary)
         {
             BREAK_IF(0 != sum_printer.PrintSummary(insn));
@@ -208,6 +226,7 @@ process_arg(int argc, char **argv)
     ("verbose,v", "print verbose messages")
     ("bap", "TODO: modify this")
     ("sum", "print summary")
+    ("ins,n", "print only decoded instructions")
     ;
     variables_map vm;
     store(parse_command_line(argc, argv, opts), vm);
@@ -233,6 +252,7 @@ process_arg(int argc, char **argv)
     g_bVerbose = (0 != vm.count("verbose"));
     g_bBAP = (0 != vm.count("bap"));
     g_bSummary = (0 != vm.count("sum"));
+    g_bInsOnly = (0 != vm.count("ins"));
 
     return 0;
 }
