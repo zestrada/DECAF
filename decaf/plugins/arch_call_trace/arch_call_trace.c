@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
 
 /*
  * Plugin to provide a function call trace along with architectural operations
@@ -44,12 +45,26 @@ static int insn_count; //Instructions we've seen since the trace started
 #define CHECK_STRUCT_ARRAY(a1, a2 ) \
         for(i=0; i<COUNT_OF(a1); i++) { CHECK_STRUCT(&a1[i], &a2[i]) }
 
+//TODO: fix earlier macros to match this style
+#define CHECK_FIELD(field) if(env->field != last_state.field) return 1;
+
+//Kinda overkill, but hey
+#define JSON_HEX(name, value, comma) \
+        fprintf(tracefile, "\"%s\": 0x%x", name, value); \
+        if(comma) fprintf(tracefile, ", ");
+        
+//Lazy copy+paste refactor if it needs to change again!
+#define JSON_U64HEX(name, value, comma) \
+        fprintf(tracefile, "\"%s\": 0x%" PRIx64 "", name, value); \
+        if(comma) fprintf(tracefile, ", ");
+
 #define JSON_SEGMENT(seg, outname) \
         fprintf(tracefile, "\"%s\": { \"selector\": %x, ", \
                 outname, seg.selector); \
-        fprintf(tracefile, "\"base\": %x, ", seg.base); \
-        fprintf(tracefile, "\"limit\": %x, ", seg.limit); \
-        fprintf(tracefile, "\"flags\": %x }", seg.flags); \
+        JSON_HEX("base", seg.base, true) \
+        JSON_HEX("limit", seg.limit, true) \
+        JSON_HEX("flags", seg.flags, true) \
+        fprintf(tracefile, "}");
 
 #define JSON_ARRAY(array, outname) \
         fprintf(tracefile, "\"%s\": [", outname); \
@@ -60,18 +75,41 @@ static int insn_count; //Instructions we've seen since the trace started
         } \
         fprintf(tracefile, "]");
 
+#define JSON_U64ARRAY(array, outname) \
+        fprintf(tracefile, "\"%s\": [", outname); \
+        for(i=0; i<COUNT_OF(array); i++) {\
+           fprintf(tracefile, "0x%" PRIx64 "", array[i]); \
+           if(i<COUNT_OF(array)-1) \
+             fprintf(tracefile, ", "); \
+        } \
+        fprintf(tracefile, "]");
 /*This is the check to see if architectural state has been modified since the
  *last instruction or check the opcode if the particular instruction is known to *modify state
  */
 //TODO: will we discover all exceptions here?
 static int insn_affects_state(CPUState *env, unsigned char *insn) {
   int i; //general iterator used by macros!
+
+  /*Standard x86 specific state*/
   CHECK_STRUCT(&env->ldt, &last_state.ldt) //Check LDTR
   CHECK_STRUCT(&env->tr, &last_state.tr) //Check TR
   CHECK_STRUCT(&env->gdt, &last_state.gdt) //Check GDTR
   CHECK_STRUCT(&env->idt, &last_state.idt) //Check IDTR
   CHECK_ARRAY(env->cr, last_state.cr) //Check CRs
   CHECK_STRUCT_ARRAY(env->segs, last_state.segs) //Check segment registers
+
+  /*Exceptions*/
+  if(!env->exception_is_int) { //For now, ignore interrupts
+    CHECK_FIELD(exception_index)
+    CHECK_FIELD(error_code)
+  }
+
+  /*Misc Memory Things*/
+  CHECK_ARRAY(env->mtrr_fixed, last_state.mtrr_fixed)
+  CHECK_STRUCT_ARRAY(env->mtrr_var, last_state.mtrr_var)
+  CHECK_FIELD(mtrr_deftype) //Page attribute table
+  CHECK_FIELD(pat) //Page attribute table
+
   return 0;
 }
 
@@ -94,6 +132,7 @@ static void write_state(CPUState *env) {
   int i; //iterator used by macros!
   fprintf(tracefile, "(%d) 0x%x: {", insn_count, env->eip);
 
+  /*Standard x86 specific state*/
   JSON_ARRAY(env->cr, "CR")
   fprintf(tracefile, ", ");
   JSON_SEGMENT(env->ldt, "LDT")
@@ -108,6 +147,27 @@ static void write_state(CPUState *env) {
     JSON_SEGMENT(env->segs[i], seg_names[i])
   }
 
+  /*Exception handling stuff*/
+  fprintf(tracefile, ", ");
+  fprintf(tracefile, "\"exception:\" {"); 
+  {
+    JSON_HEX("index", env->exception_index, true)
+    JSON_HEX("error_code", env->error_code, false)
+  }
+  fprintf(tracefile, "}, ");
+
+  /*Misc Memory Things*/
+  JSON_U64HEX("pat", env->pat, true)
+  JSON_U64ARRAY(env->mtrr_fixed, "mtrr_fixed")
+  fprintf(tracefile, ", \"mtrr_var\": [");
+  for(i=0; i<COUNT_OF(env->mtrr_var); i++) {
+    fprintf(tracefile, "{\"base\": %" PRIx64", \"mask\": %" PRIx64"}",
+                       env->mtrr_var[i].base, env->mtrr_var[i].mask);
+    if(i<COUNT_OF(env->mtrr_var)-1) fprintf(tracefile, ", ");
+  }
+  fprintf(tracefile, "]");
+
+  //END
   fprintf(tracefile, "}\n");
 }
 
