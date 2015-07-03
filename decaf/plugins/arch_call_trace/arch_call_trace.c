@@ -50,26 +50,26 @@ static int insn_count; //Instructions we've seen since the trace started
 
 //Kinda overkill, but hey
 #define JSON_HEX(name, value, comma) \
-        fprintf(tracefile, "\"%s\": 0x%x", name, value); \
+        fprintf(tracefile, "\"%s\": \"0x%x\"", name, value); \
         if(comma) fprintf(tracefile, ", ");
         
 //Lazy copy+paste refactor if it needs to change again!
 #define JSON_U64HEX(name, value, comma) \
-        fprintf(tracefile, "\"%s\": 0x%" PRIx64 "", name, value); \
+        fprintf(tracefile, "\"%s\": \"0x%" PRIx64 "\"", name, value); \
         if(comma) fprintf(tracefile, ", ");
 
 #define JSON_SEGMENT(seg, outname) \
-        fprintf(tracefile, "\"%s\": { \"selector\": %x, ", \
+        fprintf(tracefile, "\"%s\": { \"selector\": \"0x%x\", ", \
                 outname, seg.selector); \
         JSON_HEX("base", seg.base, true) \
         JSON_HEX("limit", seg.limit, true) \
-        JSON_HEX("flags", seg.flags, true) \
+        JSON_HEX("flags", seg.flags, false) \
         fprintf(tracefile, "}");
 
 #define JSON_ARRAY(array, outname) \
         fprintf(tracefile, "\"%s\": [", outname); \
         for(i=0; i<COUNT_OF(array); i++) {\
-           fprintf(tracefile, "0x%x", array[i]); \
+           fprintf(tracefile, "\"0x%x\"", array[i]); \
            if(i<COUNT_OF(array)-1) \
              fprintf(tracefile, ", "); \
         } \
@@ -78,7 +78,7 @@ static int insn_count; //Instructions we've seen since the trace started
 #define JSON_U64ARRAY(array, outname) \
         fprintf(tracefile, "\"%s\": [", outname); \
         for(i=0; i<COUNT_OF(array); i++) {\
-           fprintf(tracefile, "0x%" PRIx64 "", array[i]); \
+           fprintf(tracefile, "\"0x%" PRIx64 "\"", array[i]); \
            if(i<COUNT_OF(array)-1) \
              fprintf(tracefile, ", "); \
         } \
@@ -154,7 +154,7 @@ static void write_state(CPUState *env) {
 
   /*Exception handling stuff*/
   fprintf(tracefile, ", ");
-  fprintf(tracefile, "\"exception:\" {"); 
+  fprintf(tracefile, "\"exception\": {"); 
   {
     JSON_HEX("index", env->exception_index, true)
     JSON_HEX("error_code", env->error_code, false)
@@ -166,8 +166,9 @@ static void write_state(CPUState *env) {
   JSON_U64ARRAY(env->mtrr_fixed, "mtrr_fixed")
   fprintf(tracefile, ", \"mtrr_var\": [");
   for(i=0; i<COUNT_OF(env->mtrr_var); i++) {
-    fprintf(tracefile, "{\"base\": %" PRIx64", \"mask\": %" PRIx64"}",
-                       env->mtrr_var[i].base, env->mtrr_var[i].mask);
+    fprintf(tracefile,
+            "{\"base\": \"0x%" PRIx64"\", \"mask\": \"0x%" PRIx64"\"}",
+            env->mtrr_var[i].base, env->mtrr_var[i].mask);
     if(i<COUNT_OF(env->mtrr_var)-1) fprintf(tracefile, ", ");
   }
   fprintf(tracefile, "], ");
