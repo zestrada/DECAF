@@ -135,7 +135,8 @@ static void write_state(CPUState *env) {
   if(tracefile==NULL)
     return;
   int i; //iterator used by macros!
-  fprintf(tracefile, "(%d) 0x%x: {", insn_count, env->eip);
+  fprintf(tracefile, "{ \"insn_count\": %d, \"eip\": \"0x%x\", ",
+                     insn_count, env->eip);
 
   /*Standard x86 specific state*/
   JSON_ARRAY(env->cr, "CR")
