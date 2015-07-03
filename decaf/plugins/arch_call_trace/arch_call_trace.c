@@ -109,6 +109,11 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
   CHECK_STRUCT_ARRAY(env->mtrr_var, last_state.mtrr_var)
   CHECK_FIELD(mtrr_deftype) //Page attribute table
   CHECK_FIELD(pat) //Page attribute table
+  CHECK_FIELD(xcr0) 
+
+
+  /*Check instruction opcode*/
+  //TODO think of instructions: mwait, invlpg, etc...
 
   return 0;
 }
@@ -165,7 +170,10 @@ static void write_state(CPUState *env) {
                        env->mtrr_var[i].base, env->mtrr_var[i].mask);
     if(i<COUNT_OF(env->mtrr_var)-1) fprintf(tracefile, ", ");
   }
-  fprintf(tracefile, "]");
+  fprintf(tracefile, "], ");
+  JSON_HEX("xcr0", env->xcr0, false)
+
+  /*When outputting instructions, we'll just use binary*/
 
   //END
   fprintf(tracefile, "}\n");
