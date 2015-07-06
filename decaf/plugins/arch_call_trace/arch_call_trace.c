@@ -8,24 +8,19 @@
 #include <string.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <xed-interface.h>
 
 /*
  * Plugin to provide a function call trace along with architectural operations
  * that occur inside each function.  Heavily inspired by tracecap, but I'm
  * hoping that we can work with a simpler subset of functionality. Otherwise,
  * I'll port these checks over to a forked version of that plugin
+ *
+ * NOTE: this is not thread safe in the least bit!
  */
 
-//TODO:
-//      1. On a call instruction: 
-//        - Output full CPU state (general purpose+architectural)
-//      2. On every instruction:
-//        - check for architectural state changes and output if changed
-//        - think about if this is really needed if we're already getting the
-//          full state at each call
-//        - Maybe look for interrupts/exceptions?
-//        - Check for VMExit possibility (new callback?)
 #define MAX_INSN_BYTES 15 /* Maximum number of bytes in a x86 instruction */
+#define MAX_STR_LEN 15 /* Maximum number of bytes in a x86 instruction */
 
 static plugin_interface_t my_interface;
 static DECAF_Handle vmcall_handle = DECAF_NULL_HANDLE;
@@ -36,7 +31,7 @@ static CPUState last_state;
 static int insn_count; //Instructions we've seen since the trace started
 
 /*Macros that will be used for checking and printing hardware state*/
-//TODO: is padding 0 or will this just blow up?
+//I know memcmp isn't the best, but we will filter any false positives later
 #define CHECK_STRUCT(s1, s2) \
         if(memcmp((const void *) s1, (const void *) s2, sizeof(s1))) return 1;
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
@@ -83,12 +78,36 @@ static int insn_count; //Instructions we've seen since the trace started
              fprintf(tracefile, ", "); \
         } \
         fprintf(tracefile, "]");
+
+/*These are the classes of instruction that we care about */
+struct insn_table {
+  int wait;
+} insn_table;
+
+/*Takes the iform for our instruction and a list of other iforms count long
+ * return 1 if any match, 0 if not
+ */
+int matchesform(xed_iform_enum_t iform, int count, ...) {
+  va_list args;
+  int i;
+
+  va_start(args, count);
+
+  for(i=0; i<count; i++) {
+    if(iform == va_arg(args, xed_iform_enum_t))
+      return 1;
+  }
+
+  return 0;
+}
+
 /*This is the check to see if architectural state has been modified since the
  *last instruction or check the opcode if the particular instruction is known to *modify state
  */
-//TODO: will we discover all exceptions here?
 static int insn_affects_state(CPUState *env, unsigned char *insn) {
   int i; //general iterator used by macros!
+  xed_decoded_inst_t insn_decoded;
+  xed_iform_enum_t iform; //form of the last executed instruction
 
   /*Standard x86 specific state*/
   CHECK_STRUCT(&env->ldt, &last_state.ldt) //Check LDTR
@@ -112,8 +131,14 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
   CHECK_FIELD(xcr0) 
 
 
-  /*Check instruction opcode*/
-  //TODO think of instructions: mwait, invlpg, etc...
+  /*Check instruction opcode using the xed library*/
+  xed_decoded_inst_zero(&insn_decoded);
+  xed_decoded_inst_set_mode(&insn_decoded, XED_MACHINE_MODE_LEGACY_32,
+                            XED_ADDRESS_WIDTH_32b);
+  xed_decode(&insn_decoded, (const xed_uint8_t *) insn, 15);
+
+  iform = xed_decoded_inst_get_iform_enum(&insn_decoded);
+  insn_table.wait = matchesform(iform, 2, XED_IFORM_MWAIT, XED_IFORM_FWAIT);
 
   return 0;
 }
@@ -173,11 +198,14 @@ static void write_state(CPUState *env) {
     if(i<COUNT_OF(env->mtrr_var)-1) fprintf(tracefile, ", ");
   }
   fprintf(tracefile, "], ");
-  JSON_HEX("xcr0", env->xcr0, false)
+  JSON_U64HEX("xcr0", env->xcr0, true)
 
-  /*When outputting instructions, we'll just use binary*/
+  /*When outputting instructions, we'll just use boolean values*/
+  //TODO: JSON TABLE FOR INSTRUCTIONS OF INTEREST? 
+  fprintf(tracefile, "\"instructions\": {"); 
+    JSON_HEX("wait", insn_table.wait, false)
+  fprintf(tracefile, "}");
 
-  //END
   fprintf(tracefile, "}\n");
 }
 
@@ -309,6 +337,9 @@ plugin_interface_t* init_plugin(void) {
   if (vmcall_handle == DECAF_NULL_HANDLE) {
     DECAF_printf("Could not register for the vmcall_CB\n");  
   }
+
+  /*instruction decoding stuff*/
+  xed_tables_init();
 
   return (&my_interface);
 }

@@ -11,6 +11,15 @@ DEFINES=-I. -I$(SRC_PATH) -I$(SRC_PATH)/plugins -I$(SRC_PATH)/fpu -I$(SRC_PATH)/
 DEFINES+=-D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE -DNEED_CPU_H
 DEFINES+=-I$(GLIB_CFLAGS)
 
+ifeq ($(ARCH), x86_64)
+LIBS+=-L$(SRC_PATH)/shared/xed2/xed2-intel64/lib -lxed
+DEFINES+= -I$(SRC_PATH)/shared/xed2/xed2-intel64/include
+endif
+ifeq ($(ARCH), i386)
+LIBS+=-L$(SRC_PATH)/shared/xed2/xed2-ia32/lib -lxed
+DEFINES+= -I$(SRC_PATH)/shared/xed2/xed2-ia32/include
+endif
+
 CC=gcc
 CPP=g++
 CFLAGS=-Wall -O2 -g -fPIC -MMD 
