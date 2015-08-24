@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <xed-interface.h>
+#include <xed-interface.h>
 
 /*
  * Plugin to provide a function call trace along with architectural operations
@@ -47,6 +48,9 @@ static int insn_count; //Instructions we've seen since the trace started
 #define JSON_HEX(name, value, comma) \
         fprintf(tracefile, "\"%s\": \"0x%x\"", name, value); \
         if(comma) fprintf(tracefile, ", ");
+#define JSON_INT(name, value, comma) \
+        fprintf(tracefile, "\"%s\": %d", name, value); \
+        if(comma) fprintf(tracefile, ", ");
         
 //Lazy copy+paste refactor if it needs to change again!
 #define JSON_U64HEX(name, value, comma) \
@@ -82,6 +86,12 @@ static int insn_count; //Instructions we've seen since the trace started
 /*These are the classes of instruction that we care about */
 struct insn_table {
   int wait;
+  int call_far_ptrp_immw;
+  int call_far_memp2;
+  int call_near_memv;
+  int call_near_relbrd;
+  int call_near_relbrz;
+  int call_near_gprv;
 } insn_table;
 
 /*Takes the iform for our instruction and a list of other iforms count long
@@ -139,6 +149,12 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
 
   iform = xed_decoded_inst_get_iform_enum(&insn_decoded);
   insn_table.wait = matchesform(iform, 2, XED_IFORM_MWAIT, XED_IFORM_FWAIT);
+  insn_table.call_far_ptrp_immw = matchesform(iform, 1, XED_IFORM_CALL_FAR_PTRp_IMMw);
+  insn_table.call_far_memp2 = matchesform(iform, 1, XED_IFORM_CALL_FAR_MEMp2);
+  insn_table.call_near_memv = matchesform(iform, 1, XED_IFORM_CALL_NEAR_MEMv);
+  insn_table.call_near_relbrd = matchesform(iform, 1, XED_IFORM_CALL_NEAR_RELBRd);
+  insn_table.call_near_relbrz = matchesform(iform, 1, XED_IFORM_CALL_NEAR_RELBRz);
+  insn_table.call_near_gprv = matchesform(iform, 1, XED_IFORM_CALL_NEAR_GPRv);
 
   return 0;
 }
@@ -203,7 +219,13 @@ static void write_state(CPUState *env) {
   /*When outputting instructions, we'll just use boolean values*/
   //TODO: JSON TABLE FOR INSTRUCTIONS OF INTEREST? 
   fprintf(tracefile, "\"instructions\": {"); 
-    JSON_HEX("wait", insn_table.wait, false)
+    JSON_INT("wait", insn_table.wait, true)
+    JSON_INT("call_far_ptrp_immw", insn_table.call_far_ptrp_immw, true);
+    JSON_INT("call_far_memp2", insn_table.call_far_memp2, true);
+    JSON_INT("call_near_memv", insn_table.call_near_memv, true);
+    JSON_INT("call_near_relbrd", insn_table.call_near_relbrd, true);
+    JSON_INT("call_near_relbrz", insn_table.call_near_relbrz, true);
+    JSON_INT("call_near_gprv", insn_table.call_near_gprv, false);
   fprintf(tracefile, "}");
 
   fprintf(tracefile, "}\n");
