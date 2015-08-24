@@ -84,6 +84,7 @@ static int insn_count; //Instructions we've seen since the trace started
         fprintf(tracefile, "]");
 
 /*These are the classes of instruction that we care about */
+/*TODO: convert to array with enums*/
 struct insn_table {
   int wait;
   int call_far_ptrp_immw;
@@ -92,7 +93,32 @@ struct insn_table {
   int call_near_relbrd;
   int call_near_relbrz;
   int call_near_gprv;
+  int sysexit; //actually sysret too
+  /*Was originally going to combine some of these, but we can do that in post
+   * processing*/
+  int jb;
+  int jbe;
+  int jl;
+  int jle;
+  int jmp;
+  int jmp_far;
+  int jnb;
+  int jnbe;
+  int jnl;
+  int jnle;
+  int jno;
+  int jnp;
+  int jns;
+  int jnz;
+  int jo;
+  int jp;
+  int jrcxz;
+  int js;
+  int jz;
+  int last_invalid;
 } insn_table;
+
+struct insn_table insn_table_zeros;
 
 /*Takes the iform for our instruction and a list of other iforms count long
  * return 1 if any match, 0 if not
@@ -111,13 +137,36 @@ int matchesform(xed_iform_enum_t iform, int count, ...) {
   return 0;
 }
 
+/*Same as above, but iclass. Didn't want to do evil casting. Feel free to
+ * refactor
+ */
+int matchesclass(xed_iclass_enum_t iform, int count, ...) {
+  va_list args;
+  int i;
+
+  va_start(args, count);
+
+  for(i=0; i<count; i++) {
+    if(iform == va_arg(args, xed_iclass_enum_t))
+      return 1;
+  }
+
+  return 0;
+}
+
+
 /*This is the check to see if architectural state has been modified since the
- *last instruction or check the opcode if the particular instruction is known to *modify state
+ *last instruction or check the opcode if the particular instruction is known to 
+ *modify state
+ *NOTE that we do lazy evaluation. An implicit assumption is that one 
+ * instruction will only affect one of these things at at time
+ *this may not be valid, so we could switch to the more expensive thing...
  */
 static int insn_affects_state(CPUState *env, unsigned char *insn) {
   int i; //general iterator used by macros!
   xed_decoded_inst_t insn_decoded;
   xed_iform_enum_t iform; //form of the last executed instruction
+  xed_iclass_enum_t iclass; //class of the last executed instruction
 
   /*Standard x86 specific state*/
   CHECK_STRUCT(&env->ldt, &last_state.ldt) //Check LDTR
@@ -147,14 +196,45 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
                             XED_ADDRESS_WIDTH_32b);
   xed_decode(&insn_decoded, (const xed_uint8_t *) insn, 15);
 
+  /*Check by iform*/
   iform = xed_decoded_inst_get_iform_enum(&insn_decoded);
   insn_table.wait = matchesform(iform, 2, XED_IFORM_MWAIT, XED_IFORM_FWAIT);
-  insn_table.call_far_ptrp_immw = matchesform(iform, 1, XED_IFORM_CALL_FAR_PTRp_IMMw);
+  insn_table.call_far_ptrp_immw = matchesform(iform, 1,
+                                              XED_IFORM_CALL_FAR_PTRp_IMMw);
   insn_table.call_far_memp2 = matchesform(iform, 1, XED_IFORM_CALL_FAR_MEMp2);
   insn_table.call_near_memv = matchesform(iform, 1, XED_IFORM_CALL_NEAR_MEMv);
-  insn_table.call_near_relbrd = matchesform(iform, 1, XED_IFORM_CALL_NEAR_RELBRd);
-  insn_table.call_near_relbrz = matchesform(iform, 1, XED_IFORM_CALL_NEAR_RELBRz);
+  insn_table.call_near_relbrd = matchesform(iform, 1, 
+                                            XED_IFORM_CALL_NEAR_RELBRd);
+  insn_table.call_near_relbrz = matchesform(iform, 1,
+                                            XED_IFORM_CALL_NEAR_RELBRz);
   insn_table.call_near_gprv = matchesform(iform, 1, XED_IFORM_CALL_NEAR_GPRv);
+  insn_table.sysexit = matchesform(iform, 2, XED_IFORM_SYSEXIT, 
+                                   XED_IFORM_SYSRET);
+
+  /*Check by iclass*/
+  iclass  = xed_iform_to_iclass(iform);
+  insn_table.jb = matchesclass(iclass, 1, XED_ICLASS_JB);
+  insn_table.jbe = matchesclass(iclass, 1, XED_ICLASS_JBE);
+  insn_table.jl = matchesclass(iclass, 1, XED_ICLASS_JL);
+  insn_table.jle = matchesclass(iclass, 1, XED_ICLASS_JLE);
+  insn_table.jmp = matchesclass(iclass, 1, XED_ICLASS_JMP);
+  insn_table.jmp_far = matchesclass(iclass, 1, XED_ICLASS_JMP_FAR);
+  insn_table.jnb = matchesclass(iclass, 1, XED_ICLASS_JNB);
+  insn_table.jnbe = matchesclass(iclass, 1, XED_ICLASS_JNBE);
+  insn_table.jnl = matchesclass(iclass, 1, XED_ICLASS_JNL);
+  insn_table.jnle = matchesclass(iclass, 1, XED_ICLASS_JNLE);
+  insn_table.jno = matchesclass(iclass, 1, XED_ICLASS_JNO);
+  insn_table.jnp = matchesclass(iclass, 1, XED_ICLASS_JNP);
+  insn_table.jns = matchesclass(iclass, 1, XED_ICLASS_JNS);
+  insn_table.jnz = matchesclass(iclass, 1, XED_ICLASS_JNZ);
+  insn_table.jo = matchesclass(iclass, 1, XED_ICLASS_JO);
+  insn_table.jp = matchesclass(iclass, 1, XED_ICLASS_JP);
+  insn_table.jrcxz = matchesclass(iclass, 1, XED_ICLASS_JRCXZ);
+  insn_table.js = matchesclass(iclass, 1, XED_ICLASS_JS);
+  insn_table.jz = matchesclass(iclass, 1, XED_ICLASS_JZ);
+
+  /*If we got any 1s in those instructions, we have a change*/ 
+  CHECK_STRUCT(&insn_table, &insn_table_zeros);
 
   return 0;
 }
@@ -225,7 +305,27 @@ static void write_state(CPUState *env) {
     JSON_INT("call_near_memv", insn_table.call_near_memv, true);
     JSON_INT("call_near_relbrd", insn_table.call_near_relbrd, true);
     JSON_INT("call_near_relbrz", insn_table.call_near_relbrz, true);
-    JSON_INT("call_near_gprv", insn_table.call_near_gprv, false);
+    JSON_INT("call_near_gprv", insn_table.call_near_gprv, true);
+    JSON_INT("sysexit", insn_table.sysexit, true);
+    JSON_INT("jb", insn_table.jb, true);
+    JSON_INT("jbe", insn_table.jbe, true);
+    JSON_INT("jl", insn_table.jl, true);
+    JSON_INT("jle", insn_table.jle, true);
+    JSON_INT("jmp", insn_table.jmp, true);
+    JSON_INT("jmp_far", insn_table.jmp_far, true);
+    JSON_INT("jnb", insn_table.jnb, true);
+    JSON_INT("jnbe", insn_table.jnbe, true);
+    JSON_INT("jnl", insn_table.jnl, true);
+    JSON_INT("jnle", insn_table.jnle, true);
+    JSON_INT("jno", insn_table.jno, true);
+    JSON_INT("jnp", insn_table.jnp, true);
+    JSON_INT("jns", insn_table.jns, true);
+    JSON_INT("jnz", insn_table.jnz, true);
+    JSON_INT("jo", insn_table.jo, true);
+    JSON_INT("jp", insn_table.jp, true);
+    JSON_INT("jrcxz", insn_table.jrcxz, true);
+    JSON_INT("js", insn_table.js, true);
+    JSON_INT("jz", insn_table.jz, false);
   fprintf(tracefile, "}");
 
   fprintf(tracefile, "}\n");
@@ -307,7 +407,7 @@ static void vmcall_callback(DECAF_Callback_Params* params) {
 
   DECAF_printf("Got vmcall number %x!\n", callnum);
   if(callnum == 0) {
-  /* start instruction tracing */
+  /* start instruction tracing and initiliaze variables */
     if(trace_filename[0] == '\0') {
       DECAF_printf("Set filename first using command!\n");
       return;
@@ -321,6 +421,9 @@ static void vmcall_callback(DECAF_Callback_Params* params) {
     }
     DECAF_printf("writing output to %s\n",trace_filename);
     insn_count=-1;
+    memset(&insn_table, 0x0, sizeof(insn_table));
+   /* didn't do C99 'struct = {0}' in case padding ends up being weird */
+    memset(&insn_table_zeros, 0x0, sizeof(insn_table));
     insn_end_handle = DECAF_register_callback(DECAF_INSN_END_CB,
         insn_end_callback, NULL);
   } else if(callnum ==1) {
