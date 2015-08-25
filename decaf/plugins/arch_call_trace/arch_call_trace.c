@@ -44,45 +44,6 @@ static int insn_count; //Instructions we've seen since the trace started
 //TODO: fix earlier macros to match this style
 #define CHECK_FIELD(field) if(env->field != last_state.field) return 1;
 
-//Kinda overkill, but hey
-#define JSON_HEX(name, value, comma) \
-        fprintf(tracefile, "\"%s\": \"0x%x\"", name, value); \
-        if(comma) fprintf(tracefile, ", ");
-#define JSON_INT(name, value, comma) \
-        fprintf(tracefile, "\"%s\": %d", name, value); \
-        if(comma) fprintf(tracefile, ", ");
-        
-//Lazy copy+paste refactor if it needs to change again!
-#define JSON_U64HEX(name, value, comma) \
-        fprintf(tracefile, "\"%s\": \"0x%" PRIx64 "\"", name, value); \
-        if(comma) fprintf(tracefile, ", ");
-
-#define JSON_SEGMENT(seg, outname) \
-        fprintf(tracefile, "\"%s\": { \"selector\": \"0x%x\", ", \
-                outname, seg.selector); \
-        JSON_HEX("base", seg.base, true) \
-        JSON_HEX("limit", seg.limit, true) \
-        JSON_HEX("flags", seg.flags, false) \
-        fprintf(tracefile, "}");
-
-#define JSON_ARRAY(array, outname) \
-        fprintf(tracefile, "\"%s\": [", outname); \
-        for(i=0; i<COUNT_OF(array); i++) {\
-           fprintf(tracefile, "\"0x%x\"", array[i]); \
-           if(i<COUNT_OF(array)-1) \
-             fprintf(tracefile, ", "); \
-        } \
-        fprintf(tracefile, "]");
-
-#define JSON_U64ARRAY(array, outname) \
-        fprintf(tracefile, "\"%s\": [", outname); \
-        for(i=0; i<COUNT_OF(array); i++) {\
-           fprintf(tracefile, "\"0x%" PRIx64 "\"", array[i]); \
-           if(i<COUNT_OF(array)-1) \
-             fprintf(tracefile, ", "); \
-        } \
-        fprintf(tracefile, "]");
-
 /*These are the classes of instruction that we care about */
 /*TODO: convert to array with enums*/
 struct insn_table {
@@ -119,6 +80,7 @@ struct insn_table {
 } insn_table;
 
 struct insn_table insn_table_zeros;
+xed_uint_t insn_len;
 
 /*Takes the iform for our instruction and a list of other iforms count long
  * return 1 if any match, 0 if not
@@ -194,6 +156,8 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
   xed_decoded_inst_set_mode(&insn_decoded, XED_MACHINE_MODE_LEGACY_32,
                             XED_ADDRESS_WIDTH_32b);
   xed_decode(&insn_decoded, (const xed_uint8_t *) insn, 15);
+  insn_len = xed_decoded_inst_get_length(&insn_decoded);
+  insn_len = insn_len > MAX_INSN_BYTES ? MAX_INSN_BYTES : insn_len;
   memset(&insn_table, 0x0, sizeof(insn_table));
 
   /*Check by iform*/
@@ -239,6 +203,52 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
   return 0;
 }
 
+//Kinda overkill, but hey
+#define JSON_HEX(name, value, comma) \
+        fprintf(tracefile, "\"%s\": \"0x%x\"", name, value); \
+        if(comma) fprintf(tracefile, ", ");
+#define JSON_INT(name, value, comma) \
+        fprintf(tracefile, "\"%s\": %d", name, value); \
+        if(comma) fprintf(tracefile, ", ");
+        
+//Lazy copy+paste refactor if it needs to change again!
+#define JSON_U64HEX(name, value, comma) \
+        fprintf(tracefile, "\"%s\": \"0x%" PRIx64 "\"", name, value); \
+        if(comma) fprintf(tracefile, ", ");
+
+#define JSON_SEGMENT(seg, outname) \
+        fprintf(tracefile, "\"%s\": { \"selector\": \"0x%x\", ", \
+                outname, seg.selector); \
+        JSON_HEX("base", seg.base, true) \
+        JSON_HEX("limit", seg.limit, true) \
+        JSON_HEX("flags", seg.flags, false) \
+        fprintf(tracefile, "}");
+
+#define JSON_ARRAY(array, outname) \
+        fprintf(tracefile, "\"%s\": [", outname); \
+        for(i=0; i<COUNT_OF(array); i++) {\
+           fprintf(tracefile, "\"0x%x\"", array[i]); \
+           if(i<COUNT_OF(array)-1) \
+             fprintf(tracefile, ", "); \
+        } \
+        fprintf(tracefile, "]");
+
+#define JSON_U64ARRAY(array, outname) \
+        fprintf(tracefile, "\"%s\": [", outname); \
+        for(i=0; i<COUNT_OF(array); i++) {\
+           fprintf(tracefile, "\"0x%" PRIx64 "\"", array[i]); \
+           if(i<COUNT_OF(array)-1) \
+             fprintf(tracefile, ", "); \
+        } \
+        fprintf(tracefile, "]");
+
+#define JSON_BYTES(name, pointer, num, comma) \
+        fprintf(tracefile, "\"%s\": \"0x", name); \
+        for(i=0;i<num;i++) \
+          fprintf(tracefile, "%x", *(((unsigned char*)pointer)+i)&0xFF); \
+        fprintf(tracefile, "\""); \
+        if(comma) fprintf(tracefile, ", ");
+
 /*These are taken from target-i386/cpu.h and used to identify the segment regs!
  *ensure these are consistent if porting to a new version!
  *#define R_ES 0
@@ -250,14 +260,16 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
  */
 const char seg_names[6][3] = {"ES", "CS", "SS", "DS", "FS", "GS"};
 /* output state in JSON format for easy parsing */
-static void write_state(CPUState *env) {
+static void write_state(CPUState *env, unsigned char* insn) {
   //TODO: we may need to use synchronization methods, but here I'm assuming
   //      single threaded
   if(tracefile==NULL)
     return;
   int i; //iterator used by macros!
+  /*First some stats and the instruction bytes*/
   fprintf(tracefile, "{ \"insn_count\": %d, \"eip\": \"0x%x\", ",
                      insn_count, env->eip);
+  JSON_BYTES("insn", insn, insn_len, true); 
 
   /*Standard x86 specific state*/
   JSON_ARRAY(env->cr, "CR")
@@ -331,15 +343,6 @@ static void write_state(CPUState *env) {
   fprintf(tracefile, "}\n");
 }
 
-/* check for function call */
-//TODO: for now, we don't need this. We'll do this if we need to track data
-//structs. We can then track them using args and ctags/dwarf info
-static int is_call(unsigned char *insn) {
-  //used this site a reference:
-  //http://x86.renejeschke.de/html/file_module_x86_id_26.html 
-  return 1;
-}
-
 static void insn_end_callback(DECAF_Callback_Params* params) {
 	CPUState* env = NULL;
   unsigned char insn[MAX_INSN_BYTES];
@@ -363,13 +366,10 @@ static void insn_end_callback(DECAF_Callback_Params* params) {
   if(!insn_affects_state(env, insn))
     goto ie_out;
 
-  if(!is_call(insn))
-    goto ie_out;
-    
   //we've now written the PC, so we can use System.map to bound the function
   //TODO: print out state that changed? (is this important right now)
   ie_output:
-    write_state(env);
+    write_state(env, insn);
     last_state = *env; 
 
   ie_out: 
