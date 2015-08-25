@@ -34,12 +34,12 @@ static int insn_count; //Instructions we've seen since the trace started
 /*Macros that will be used for checking and printing hardware state*/
 //I know memcmp isn't the best, but we will filter any false positives later
 #define CHECK_STRUCT(s1, s2) \
-        if(memcmp((const void *) s1, (const void *) s2, sizeof(s1))) return 1;
+        if(memcmp((const void *) &s1, (const void *) &s2, sizeof(s1))) return 1;
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
 #define CHECK_ARRAY(a1, a2 ) \
         for(i=0; i<COUNT_OF(a1); i++) { if(a1[i]!=a2[i]) return 1; }
 #define CHECK_STRUCT_ARRAY(a1, a2 ) \
-        for(i=0; i<COUNT_OF(a1); i++) { CHECK_STRUCT(&a1[i], &a2[i]) }
+        for(i=0; i<COUNT_OF(a1); i++) { CHECK_STRUCT(a1[i], a2[i]) }
 
 //TODO: fix earlier macros to match this style
 #define CHECK_FIELD(field) if(env->field != last_state.field) return 1;
@@ -159,7 +159,7 @@ int matchesclass(xed_iclass_enum_t iclass, int count, ...) {
  *last instruction or check the opcode if the particular instruction is known to 
  *modify state
  *NOTE that we do lazy evaluation. An implicit assumption is that one 
- * instruction will only affect one of these things at at time
+ * instruction will only affect one of these structures at a time
  *this may not be valid, so we could switch to the more expensive thing...
  */
 static int insn_affects_state(CPUState *env, unsigned char *insn) {
@@ -169,10 +169,10 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
   xed_iclass_enum_t iclass; //class of the last executed instruction
 
   /*Standard x86 specific state*/
-  CHECK_STRUCT(&env->ldt, &last_state.ldt) //Check LDTR
-  CHECK_STRUCT(&env->tr, &last_state.tr) //Check TR
-  CHECK_STRUCT(&env->gdt, &last_state.gdt) //Check GDTR
-  CHECK_STRUCT(&env->idt, &last_state.idt) //Check IDTR
+  CHECK_STRUCT(env->ldt, last_state.ldt) //Check LDTR
+  CHECK_STRUCT(env->tr, last_state.tr) //Check TR
+  CHECK_STRUCT(env->gdt, last_state.gdt) //Check GDTR
+  CHECK_STRUCT(env->idt, last_state.idt) //Check IDTR
   CHECK_ARRAY(env->cr, last_state.cr) //Check CRs
   CHECK_STRUCT_ARRAY(env->segs, last_state.segs) //Check segment registers
 
@@ -234,7 +234,7 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
   insn_table.jz = matchesclass(iclass, 1, XED_ICLASS_JZ);
 
   /*If we got any 1s we have a change*/ 
-  CHECK_STRUCT(&insn_table, &insn_table_zeros);
+  CHECK_STRUCT(insn_table, insn_table_zeros);
 
   return 0;
 }
