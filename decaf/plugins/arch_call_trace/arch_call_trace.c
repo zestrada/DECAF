@@ -140,14 +140,14 @@ int matchesform(xed_iform_enum_t iform, int count, ...) {
 /*Same as above, but iclass. Didn't want to do evil casting. Feel free to
  * refactor
  */
-int matchesclass(xed_iclass_enum_t iform, int count, ...) {
+int matchesclass(xed_iclass_enum_t iclass, int count, ...) {
   va_list args;
   int i;
 
   va_start(args, count);
 
   for(i=0; i<count; i++) {
-    if(iform == va_arg(args, xed_iclass_enum_t))
+    if(iclass == va_arg(args, xed_iclass_enum_t))
       return 1;
   }
 
@@ -189,12 +189,12 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
   CHECK_FIELD(pat) //Page attribute table
   CHECK_FIELD(xcr0) 
 
-
   /*Check instruction opcode using the xed library*/
   xed_decoded_inst_zero(&insn_decoded);
   xed_decoded_inst_set_mode(&insn_decoded, XED_MACHINE_MODE_LEGACY_32,
                             XED_ADDRESS_WIDTH_32b);
   xed_decode(&insn_decoded, (const xed_uint8_t *) insn, 15);
+  memset(&insn_table, 0x0, sizeof(insn_table));
 
   /*Check by iform*/
   iform = xed_decoded_inst_get_iform_enum(&insn_decoded);
@@ -233,7 +233,7 @@ static int insn_affects_state(CPUState *env, unsigned char *insn) {
   insn_table.js = matchesclass(iclass, 1, XED_ICLASS_JS);
   insn_table.jz = matchesclass(iclass, 1, XED_ICLASS_JZ);
 
-  /*If we got any 1s in those instructions, we have a change*/ 
+  /*If we got any 1s we have a change*/ 
   CHECK_STRUCT(&insn_table, &insn_table_zeros);
 
   return 0;
@@ -422,8 +422,9 @@ static void vmcall_callback(DECAF_Callback_Params* params) {
     DECAF_printf("writing output to %s\n",trace_filename);
     insn_count=-1;
     memset(&insn_table, 0x0, sizeof(insn_table));
-   /* didn't do C99 'struct = {0}' in case padding ends up being weird */
+    /* didn't do C99 'struct = {0}' in case padding ends up being weird */
     memset(&insn_table_zeros, 0x0, sizeof(insn_table));
+    //FIXME: write state here so that we have an immediate reference?   
     insn_end_handle = DECAF_register_callback(DECAF_INSN_END_CB,
         insn_end_callback, NULL);
   } else if(callnum ==1) {
