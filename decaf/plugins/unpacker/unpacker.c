@@ -135,14 +135,6 @@ void do_trace_process(Monitor *mon, const QDict *qdict)
 	return;
 
 }
-void do_stop_unpack(Monitor *mon, const QDict *qdict)
-{
-	  unpack_cr3 = 0;
-	  unpack_basename[0] = 0;
-	  //For DECAF taint check need to be completed
-	  //  mem_mark_cleanup();
-	  cur_version = 1;
-}
 void do_linux_ps(Monitor *mon, const QDict *qdict)
 {
 
@@ -270,7 +262,29 @@ static void unpacker_mem_write(DECAF_Callback_Params*dcp)
 	//phys_addr=dcp->mw.phy_addr;
 	virt_addr=dcp->mw.vaddr;
 	size=dcp->mw.dt;
+        unsigned int buf[128]; 
+        int i = 0;
 	//end
+        if (virt_addr >= 0xc109c850 && virt_addr <= 0xc109c8ef)
+        {
+          if (cpu_single_env)
+          {
+            printf("EIP = %x, writing %x to %x \n", cpu_single_env->eip, dcp->mw.value, virt_addr);
+            //dump some esp +4 values
+            DECAF_read_mem(cpu_single_env, cpu_single_env->regs[R_ESP], 128 * sizeof(unsigned int), (unsigned char*)buf);
+            for (i = 0; i < 128; i++)
+            {
+              printf("%x, ", buf[i]);
+            }
+            printf("\n");
+          }
+          else
+            printf("EIP = %x\n for %x", -1, virt_addr);
+
+          
+        }
+
+        return;
     /* Changed by Aravind: arprakas@syr.edu */
 	if(inContext) {
 		set_mem_mark(virt_addr,size,(1<<size)-1);
@@ -281,6 +295,22 @@ static void unpacker_mem_write(DECAF_Callback_Params*dcp)
 	}
 /*	END	*/
 }
+
+void do_stop_unpack(Monitor *mon, const QDict *qdict)
+{
+if(!mem_write_cb_handle){
+  printf ("IN do unpack\n");
+					mem_write_cb_handle=DECAF_register_callback(DECAF_MEM_WRITE_CB,unpacker_mem_write,NULL);
+					DECAF_printf(default_mon,"DECAF_register_callback(DECAF_MEM_WRITE_CB) pid=%d\n",0);
+				}
+
+//	  unpack_cr3 = 0;
+//	  unpack_basename[0] = 0;
+	  //For DECAF taint check need to be completed
+	  //  mem_mark_cleanup();
+//	  cur_version = 1;
+}
+
 void unregister_callbacks()
 {
 	DECAF_printf(default_mon,"Unregister_callbacks\n");
@@ -321,24 +351,24 @@ static void unpacker_loadmainmodule_notify(VMI_Callback_Params *vcp)
 		uint32_t pid=vcp->cp.pid;
 		char *name=vcp->cp.name;
 
-		if(unpack_basename[0] != 0) {
-			if(strcasecmp(name, unpack_basename)==0) {
+//		if(unpack_basename[0] != 0) {
+//			if(strcasecmp(name, unpack_basename)==0) {
 				DECAF_printf(default_mon,"loadmainmodule_notify called, %s\n", name);
 
 				monitored_pid = pid;
 				//unpack_cr3=find_cr3(pid);
 				unpack_cr3 = VMI_find_cr3_by_pid_c(pid);
 				if(!block_begin_cb_handle){
-					block_begin_cb_handle=DECAF_register_callback(DECAF_BLOCK_BEGIN_CB,unpacker_block_begin,NULL);
-					DECAF_printf(default_mon,"DECAF_register_callback(DECAF_BLOCK_BEGIN_CB) pid=%d\n",pid);
+					//block_begin_cb_handle=DECAF_register_callback(DECAF_BLOCK_BEGIN_CB,unpacker_block_begin,NULL);
+					//DECAF_printf(default_mon,"DECAF_register_callback(DECAF_BLOCK_BEGIN_CB) pid=%d\n",pid);
 				}
 				if(!mem_write_cb_handle){
 					mem_write_cb_handle=DECAF_register_callback(DECAF_MEM_WRITE_CB,unpacker_mem_write,NULL);
 					DECAF_printf(default_mon,"DECAF_register_callback(DECAF_MEM_WRITE_CB) pid=%d\n",pid);
 				}
 				start = clock();
-			}
-		}
+//			}
+//		}
 }
 
 static void unpacker_removeproc_notify(VMI_Callback_Params *vcp)
