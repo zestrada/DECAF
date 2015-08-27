@@ -44,6 +44,7 @@ public:
   static int convert(std::string& str, const TRInstructionX86& i, bool bVerbose = true);
   static int convert(TRInstructionX86& insn, const std::string& str);
   static void operandToString(std::string& str, const OperandVal& op, bool fullRegisterName = false);
+  static void printInstructionObjdump(const TRInstructionX86& insn);
 private:
   //function that is needed for sorting the operands
   //friend bool operand_compare(const OperandVal& op1, const OperandVal& op2);

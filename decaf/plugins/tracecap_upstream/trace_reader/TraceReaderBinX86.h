@@ -45,6 +45,7 @@ public:
   const TraceHeader& getTraceHeader() { return (tch); }
   const ProcessRecord& getProcessRecord() { return (psr); }
   const std::string& getInsnString() { if (!mbConvertString) {TraceConverterX86::convert(mCurStrInsn, mCurInsn, mbVerbose);} return (mCurStrInsn); }
+  void printInsnObjdump() { TraceConverterX86::printInstructionObjdump(mCurInsn); }
   void setHistorySize(size_t newSize, bool override = false);
   size_t getHistorySize() { return (iHistory.getMaxSize()); }
   History<std::string>& getStringHistory() { return (sHistory); }

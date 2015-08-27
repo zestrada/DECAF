@@ -354,6 +354,36 @@ void TraceConverterX86::operandToString(string& str, const OperandVal& op, bool 
   str = temp;  
 }
 
+/*Hack! Output instructions*/
+void TraceConverterX86::printInstructionObjdump(const TRInstructionX86& insn) 
+{
+  char line[LINE_SIZE];
+  int i;
+  cout << hex << insn.eh.address << ":" << '\t';
+
+
+  for (i = 0; i < insn.eh.inst_size; i++)
+  {
+    uint32_t t = insn.eh.rawbytes[i];
+    t &= 0xFF;
+    cout << setw(2) << setfill('0') << hex << t << ' ';
+  }
+  //pad the rest with spaces because why not?
+  for (;i<12;i++) cout << "  ";
+
+  cout << '\t';
+
+  if (get_instruction_string(&(insn.insn), FORMAT_ATT, insn.eh.address, line, LINE_SIZE) != 0)
+  {
+    cout << line << "\t";
+  }
+  else
+  {
+    cout << "null\t";
+  }
+  cout << endl;
+}
+
 void TraceConverterX86::printInstruction(ostream& outs, const TRInstructionX86& insn, bool bOps, bool bVerbose)
 {
   char line[LINE_SIZE];

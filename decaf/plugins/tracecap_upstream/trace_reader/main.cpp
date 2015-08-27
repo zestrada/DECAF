@@ -120,6 +120,7 @@ string g_sInFile;
 // string g_sOutFile;
 bool g_bBAP;
 bool g_bSummary;
+bool g_bObjdump;
 
 int
 process_arg(int argc, char **argv);
@@ -182,6 +183,11 @@ main(int argc, char **argv)
             BREAK_IF(0 != sum_printer.PrintSummary(insn));
         }
 
+        if(g_bObjdump)
+        {
+            tr.printInsnObjdump();
+        }
+
         if (g_bBAP)
         {
             BREAK_IF(0 != bap_printer.PrintBap(tr));
@@ -208,6 +214,7 @@ process_arg(int argc, char **argv)
     ("verbose,v", "print verbose messages")
     ("bap", "TODO: modify this")
     ("sum", "print summary")
+    ("objdump", "print objdump style output")
     ;
     variables_map vm;
     store(parse_command_line(argc, argv, opts), vm);
@@ -230,6 +237,7 @@ process_arg(int argc, char **argv)
     //     g_sOutFile = vm["output"].as<string>();
     // }
 
+    g_bObjdump = (0 != vm.count("objdump"));
     g_bVerbose = (0 != vm.count("verbose"));
     g_bBAP = (0 != vm.count("bap"));
     g_bSummary = (0 != vm.count("sum"));
