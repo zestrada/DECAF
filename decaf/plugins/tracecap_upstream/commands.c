@@ -54,6 +54,7 @@ static DECAF_Handle loadmainmodule_handle;
 static DECAF_Handle loadmodule_handle;
 
 static DECAF_Handle check_eip_handle;
+static DECAF_Handle vmcall_handle = DECAF_NULL_HANDLE;
 
 int io_logging_initialized = 0;
 
@@ -173,6 +174,8 @@ static void tracing_cleanup(void) {
 		DECAF_unregister_callback(DECAF_KEYSTROKE_CB, keystroke_cb_handle);
 	if (check_eip_handle)
 		DECAF_unregister_callback(DECAF_EIP_CHECK_CB, check_eip_handle);
+  if (vmcall_handle)
+    DECAF_unregister_callback(DECAF_VMCALL_CB, vmcall_handle);
 
 	DECAF_start_vm();
 }
@@ -304,6 +307,22 @@ void tracing_insn_begin(DECAF_Callback_Params* params) {
 	}
 	cpu_enable_ticks();
 
+}
+
+static const char base_path[] = "/mnt/usb/traces/systemcalls/";
+char syscall_filename[128];
+static void vmcall_callback(DECAF_Callback_Params* params) {
+  int callnum;
+  if(!params)
+      return;
+  callnum = params->ie.env->regs[R_EAX];
+  if(callnum<0) {
+    tracing_stop();
+  } else {
+    sprintf(syscall_filename, "%s%d", base_path, callnum);
+    should_trace_all_kernel = 1;
+    do_tracing_internal(-1, syscall_filename);
+  }
 }
 
 void tracing_insn_end(DECAF_Callback_Params* params) {
@@ -500,6 +519,9 @@ plugin_interface_t * init_plugin() {
 			my_loadmainmodule_notify, NULL);
 	loadmodule_handle = VMI_register_callback(VMI_LOADMODULE_CB,
 			my_loadmodule_notify, NULL);
+  vmcall_handle = DECAF_register_callback(DECAF_VMCALL_CB, &vmcall_callback,
+      NULL);
+
 	tracing_init();
 	return &tracing_interface;
 }

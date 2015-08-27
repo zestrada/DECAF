@@ -176,8 +176,8 @@ void tracing_stop()
     double systemProcessTime = (stopST - startST);
     double processTime =  userProcessTime + systemProcessTime;
 
-    monitor_printf (default_mon, "Processing time: %g U: %g S: %g\n",
-      processTime, userProcessTime, systemProcessTime);
+/*   monitor_printf (default_mon, "Processing time: %g U: %g S: %g\n",
+      processTime, userProcessTime, systemProcessTime);*/
   }
   else {
     monitor_printf(default_mon, "Could not get usage\n");

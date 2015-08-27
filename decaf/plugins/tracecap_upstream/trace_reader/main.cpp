@@ -140,6 +140,8 @@ main(int argc, char **argv)
     BapPrinter bap_printer(g_bVerbose);
 
     size_t counter = 0;
+    uint32_t first_cr3;
+    uint32_t cur_cr3;
     // size_t bapcount = 0;
     // uint64_t filepos = 0;
 
@@ -159,6 +161,9 @@ main(int argc, char **argv)
     // bapVerifier.setVerbose(g_bVerbose);
 
     //now iterate through the traces
+    first_cr3 = tr.getProcessRecord().pid;
+    cur_cr3 = first_cr3;
+    cout << "CR3:" << hex << first_cr3 << endl;
     while (tr.readNextInstruction() == 0)
     {
 
@@ -185,7 +190,14 @@ main(int argc, char **argv)
 
         if(g_bObjdump)
         {
-            tr.printInsnObjdump();
+            if(cur_cr3 == first_cr3)
+            {
+              tr.printInsnObjdump();
+            }
+            if((uint8_t) insn.eh.rawbytes[0] == 0xf && (uint8_t) insn.eh.rawbytes[1] == 0x22 &&  (uint8_t) insn.eh.rawbytes[2] == 0xd8)
+            {
+              cur_cr3 = insn.eh.operand[0].value;
+            }
         }
 
         if (g_bBAP)

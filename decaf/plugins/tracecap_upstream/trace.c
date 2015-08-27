@@ -760,7 +760,13 @@ write_insn(FILE *stream, EntryHeader *eh)
         /* for each process */
         ProcRecord pr;
         memset(&pr, 0, sizeof(ProcRecord));
-        VMI_find_process_by_cr3_c(tracecr3, pr.name, MAX_STRING_LEN, &pr.pid);
+        if(tracepid==-1) {
+          DECAF_printf("%d\n", tracepid);
+          pr.pid=cpu_single_env->cr[3];
+          DECAF_printf("%x\n", pr.pid);
+        }
+        else
+          VMI_find_process_by_cr3_c(tracecr3, pr.name, MAX_STRING_LEN, &pr.pid);
         pr.n_mods = VMI_get_loaded_modules_count_c(pr.pid);
         tmodinfo_t *pmr = (tmodinfo_t *) malloc(pr.n_mods * sizeof(tmodinfo_t));
 
