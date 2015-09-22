@@ -26,6 +26,7 @@ typedef struct _VMI_CreateProc_Params {
 	  uint32_t pid;
 	  uint32_t cr3;
 	  char *name;
+    CPUState *env;
 }VMI_CreateProc_Params;
 
 typedef VMI_CreateProc_Params VMI_RemoveProc_Params;

@@ -132,6 +132,7 @@ static void traverse_task_struct_add(CPUState *env)
             pe->parent_pid = ts_parent_pid;
             pe->cr3 = proc_cr3;
             pe->EPROC_base_addr = next_task; // store current task_struct's base address
+            pe->env = env;
             BREAK_IF(DECAF_read_mem(env, next_task + OFFSET_PROFILE.ts_comm,
                                     SIZEOF_COMM, pe->name) < 0);
             VMI_create_process(pe);

@@ -156,6 +156,7 @@ static process * find_new_process(CPUState *env, uint32_t cr3) {
 		pe->EPROC_base_addr = curr_proc_base;
 		pe->pid = pid;
 		pe->cr3 = proc_cr3;
+		pe->env = env;
 		DECAF_read_mem(env, curr_proc_base + handle_funds[GuestOS_index].offset->PSAPNAME_OFFSET,
 					NAMESIZE, pe->name);
 		DECAF_read_mem(env,
@@ -713,6 +714,7 @@ void win_vmi_init()
 	kernel_proc->cr3 = 0;
 	strcpy(kernel_proc->name, "<kernel>");
 	kernel_proc->pid = 0;
+	kernel_proc->env = NULL;
 	VMI_create_process(kernel_proc);
 
 	recon_timer = qemu_new_timer_ns(vm_clock, check_procexit, 0);

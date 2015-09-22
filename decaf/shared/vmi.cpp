@@ -290,6 +290,7 @@ int VMI_create_process(process *proc)
 	params.cp.cr3 = proc->cr3;
 	params.cp.pid = proc->pid;
 	params.cp.name = proc->name;
+  params.cp.env = proc->env;
     unordered_map < uint32_t, process * >::iterator iter =
     	process_pid_map.find(proc->pid);
     if (iter != process_pid_map.end()){

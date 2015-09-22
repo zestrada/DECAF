@@ -55,6 +55,7 @@ public:
     uint32_t pid;
     uint32_t parent_pid;
     uint32_t EPROC_base_addr;
+    CPUState *env;
     char name[VMI_MAX_MODULE_PROCESS_NAME_LEN];
     bool modules_extracted;
     //map base address to module pointer
