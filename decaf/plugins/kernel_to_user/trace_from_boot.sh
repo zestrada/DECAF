@@ -11,6 +11,6 @@ mon_cmd() {
 }
 
 mon_cmd 'unload_plugin'
-mon_cmd 'load_plugin /home/zak/decaf/github/decaf/plugins/insn_end/arch_call_trace.so'
+mon_cmd 'load_plugin /home/zak/decaf/github/decaf/plugins/kernel_to_user/kernel_to_user_trace.so'
 mon_cmd "set_filename ${1}"
 mon_cmd "start_tracing"
