@@ -26,14 +26,40 @@ static char trace_filename[128];
 static FILE *tracefile;
 static uint count;
 
-static int was_in_kernel=1;
 static target_ulong oldeip;
+static unsigned last_call;
+static int get_next_instr;
+
+
+
+static unsigned find_function_header(CPUState *env, unsigned gva) {
+  int i;
+  int SEARCH_LEN=4096;
+  uint8_t insns[SEARCH_LEN];
+
+  DECAF_read_mem(env, (gva-SEARCH_LEN), SEARCH_LEN, insns);
+  //Search backwards until we find a function protoype
+  for(i=SEARCH_LEN-1;i>1;i--) {
+    //push ebp; mov esp,ebp
+    //55 89 e5
+    if(insns[i]==0xe5 && insns[i-1]==0x89 && insns[i-2]==0x55) {
+      fprintf(tracefile, "i: %d insns: %x\n",  i,
+              (int)(insns[i] | ((int)insns[i-1]<<8) | ((int)insns[i-2]<<16)));
+      return gva-SEARCH_LEN+i-2;
+    }
+  }
+  return 0;
+}
 
 static void insn_end_callback(DECAF_Callback_Params* params) {
-  xed_decoded_inst_t insn_decoded;
-  xed_iclass_enum_t iclass; //class of the last executed instruction
   unsigned char insn[MAX_INSN_BYTES];
   char outbuf[256];
+
+  unsigned sched_addr;
+  unsigned bytes;
+  xed_decoded_inst_t insn_decoded;
+  xed_iclass_enum_t iclass; //class of the last executed instruction
+  xed_operand_values_t ops;
 
 	CPUState* env = NULL;
 	if(!params) return;
@@ -57,22 +83,36 @@ static void insn_end_callback(DECAF_Callback_Params* params) {
   insn_len = xed_decoded_inst_get_length(&insn_decoded);
   insn_len = insn_len > MAX_INSN_BYTES ? MAX_INSN_BYTES : insn_len;
 
-  iclass = xed_decoded_inst_get_iclass(&insn_decoded);
+  //iclass = xed_decoded_inst_get_iclass(&insn_decoded);
 
-  if(iclass == XED_ICLASS_MOV_CR) {
+  /*write to cr3
+  for movcr, mod=11 (register direct)
+  so move to cr3 would always have 1101 1XXX & d8 == 1*/
+  //Todo: use opcode range callback if all we need are CR3 writes
+  if(insn[0] ==  0x0f && insn[1] == 0x22 && ((insn[2] & 0xf8)==0xd8)) {
+    ops = xed_decoded_inst_operands(&insn_decoded);
+    sched_addr = find_function_header(env, env->eip);
+    fprintf(tracefile, "calling function: %x\n", sched_addr);
+
+    DECAF_read_mem(env, sched_addr, sizeof(bytes), &bytes);
+    fprintf(tracefile, "read from %x: %x\n", sched_addr, bytes);
     if(xed_decoded_inst_dump_att_format(&insn_decoded, outbuf, 255, 0)) {
       outbuf[255]='\0'; 
       fprintf(tracefile, "%x: %s\n", env->eip, outbuf);
+      fprintf(tracefile, "---\n");
       fflush(tracefile);
     }
   }
-  /*
-  if(iclass == XED_ICLASS_CALL_NEAR) {
-  
-  }
-  */
 
   /*
+  if(get_next_instr)
+    last_call = env->eip;
+
+  if(iclass == XED_ICLASS_CALL_NEAR) {
+    //on the next callback, grab eip: most correct way to get dest.
+    get_next_instr=1;
+  }
+
   if(env->eip == 0xc146baa0) {
     fprintf(tracefile, "%x\n", env->eip);
     fflush(tracefile);
@@ -105,6 +145,8 @@ static void my_cleanup(void) {
 } 
 
 static void start_tracing(void) {
+  DECAF_stop_vm();
+  get_next_instr = 0;
   count = 0;
   /* start instruction tracing and initiliaze variables */
     if(trace_filename[0] == '\0') {
@@ -121,6 +163,7 @@ static void start_tracing(void) {
     DECAF_printf("writing output to %s\n",trace_filename);
     insn_end_handle = DECAF_register_callback(DECAF_INSN_END_CB,
         insn_end_callback, NULL);
+  DECAF_start_vm();
 }
 
 static void vmcall_callback(DECAF_Callback_Params* params) {
@@ -176,7 +219,7 @@ plugin_interface_t* init_plugin(void) {
   my_interface.plugin_cleanup = &my_cleanup;
 
   trace_filename[0]='\0';
-  tracefile=NULL;
+  tracefile=NULL; 
   
   vmcall_handle = DECAF_register_callback(DECAF_VMCALL_CB, &vmcall_callback,
                                          NULL);
