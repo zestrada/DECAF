@@ -27,10 +27,11 @@ static FILE *tracefile;
 static uint count;
 
 static target_ulong oldeip;
-static unsigned last_call;
+static unsigned last_sched;
 static int get_next_instr;
 
-
+static int found_sched_times; //by "times" I meant "count"
+struct timeval last_sched_time, largest_deltat;
 
 static unsigned find_function_header(CPUState *env, unsigned gva) {
   int i;
@@ -51,12 +52,39 @@ static unsigned find_function_header(CPUState *env, unsigned gva) {
   return 0;
 }
 
+//copied from
+//http://www.gnu.org/software/libc/manual/html_node/Elapsed-Time.html
+static int timeval_subtract (struct timeval *result, struct timeval *x, struct timeval *y) {
+  /* Perform the carry for the later subtraction by updating y. */
+  if (x->tv_usec < y->tv_usec) {
+    int nsec = (y->tv_usec - x->tv_usec) / 1000000 + 1;
+    y->tv_usec -= 1000000 * nsec;
+    y->tv_sec += nsec;
+  }
+  if (x->tv_usec - y->tv_usec > 1000000) {
+    int nsec = (x->tv_usec - y->tv_usec) / 1000000;
+    y->tv_usec += 1000000 * nsec;
+    y->tv_sec -= nsec;
+  }
+
+  /* Compute the time remaining to wait.
+ *      tv_usec is certainly positive. */
+  result->tv_sec = x->tv_sec - y->tv_sec;
+  result->tv_usec = x->tv_usec - y->tv_usec;
+
+  /* Return 1 if result is negative. */
+  return x->tv_sec < y->tv_sec;
+}
+
+#define FIND_SCHED_THRES 5
+
 static void insn_end_callback(DECAF_Callback_Params* params) {
   unsigned char insn[MAX_INSN_BYTES];
   char outbuf[256];
 
   unsigned sched_addr;
   unsigned bytes;
+  struct timeval now, deltat;
   xed_decoded_inst_t insn_decoded;
   xed_iclass_enum_t iclass; //class of the last executed instruction
   xed_operand_values_t ops;
@@ -88,11 +116,27 @@ static void insn_end_callback(DECAF_Callback_Params* params) {
   /*write to cr3
   for movcr, mod=11 (register direct)
   so move to cr3 would always have 1101 1XXX & d8 == 1*/
-  //Todo: use opcode range callback if all we need are CR3 writes
   if(insn[0] ==  0x0f && insn[1] == 0x22 && ((insn[2] & 0xf8)==0xd8)) {
     ops = xed_decoded_inst_operands(&insn_decoded);
     sched_addr = find_function_header(env, env->eip);
     fprintf(tracefile, "calling function: %x\n", sched_addr);
+
+
+    //We look to see if we've got this as the scheduler 5 times in a row
+    //If so, it probably is? Crap heurestic, but can't argue with results
+
+    if(sched_addr==last_sched)  {
+      if(found_sched_times<FIND_SCHED_THRES)  {
+        found_sched_times++;
+      }
+      found_sched_times=FIND_SCHED_THRES;//prevent overflow
+    } else{
+      if(found_sched_times<FIND_SCHED_THRES) {
+        found_sched_times=0;
+        last_sched=sched_addr;
+      }
+    }
+
 
     DECAF_read_mem(env, sched_addr, sizeof(bytes), &bytes);
     fprintf(tracefile, "read from %x: %x\n", sched_addr, bytes);
@@ -100,25 +144,33 @@ static void insn_end_callback(DECAF_Callback_Params* params) {
       outbuf[255]='\0'; 
       fprintf(tracefile, "%x: %s\n", env->eip, outbuf);
       fprintf(tracefile, "---\n");
-      fflush(tracefile);
     }
-  }
-
-  /*
-  if(get_next_instr)
-    last_call = env->eip;
-
-  if(iclass == XED_ICLASS_CALL_NEAR) {
-    //on the next callback, grab eip: most correct way to get dest.
-    get_next_instr=1;
-  }
-
-  if(env->eip == 0xc146baa0) {
-    fprintf(tracefile, "%x\n", env->eip);
     fflush(tracefile);
   }
-  */
 
+  /*Get monitoring threshhold by measuring largest gap from scheduler*/
+  if(env->eip == last_sched && found_sched_times==FIND_SCHED_THRES) {
+    if(last_sched_time.tv_sec!=0) {
+      //At this point we're pretty sure we're in the actual scheduler
+      gettimeofday(&now, NULL);
+
+      timeval_subtract(&deltat, &now, &last_sched_time);
+
+      if(deltat.tv_sec>largest_deltat.tv_sec) {
+        largest_deltat = deltat;
+      } else if(deltat.tv_sec==largest_deltat.tv_sec) {
+        if(deltat.tv_usec>largest_deltat.tv_usec) {
+          largest_deltat = deltat;
+        }
+      }
+
+      fprintf(tracefile, "largest deltat: %ld.%06ld\n", 
+             largest_deltat.tv_sec, largest_deltat.tv_usec);
+      fflush(tracefile);
+    }
+    gettimeofday(&last_sched_time, NULL);
+  }
+  
   return;
 }
 
@@ -147,7 +199,10 @@ static void my_cleanup(void) {
 static void start_tracing(void) {
   DECAF_stop_vm();
   get_next_instr = 0;
+  found_sched_times = 0;
   count = 0;
+  largest_deltat.tv_sec = 0;
+  largest_deltat.tv_usec = 0;
   /* start instruction tracing and initiliaze variables */
     if(trace_filename[0] == '\0') {
       DECAF_printf("Set filename first using command!\n");
