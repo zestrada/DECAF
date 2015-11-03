@@ -26,11 +26,11 @@ static char trace_filename[128];
 static FILE *tracefile;
 static uint count;
 
-static target_ulong oldeip;
 static unsigned last_sched;
 static int get_next_instr;
 
 static int found_sched_times; //by "times" I meant "count"
+int found_sched; //boolean when we've found it
 struct timeval last_sched_time, largest_deltat;
 
 static unsigned find_function_header(CPUState *env, unsigned gva) {
@@ -86,8 +86,6 @@ static void insn_end_callback(DECAF_Callback_Params* params) {
   unsigned bytes;
   struct timeval now, deltat;
   xed_decoded_inst_t insn_decoded;
-  xed_iclass_enum_t iclass; //class of the last executed instruction
-  xed_operand_values_t ops;
 
 	CPUState* env = NULL;
 	if(!params) return;
@@ -102,75 +100,73 @@ static void insn_end_callback(DECAF_Callback_Params* params) {
 
   count++;
 
-  DECAF_read_mem(env, env->eip, MAX_INSN_BYTES, insn);
+  if(found_sched) {
+    /*Get monitoring threshhold by measuring largest gap from scheduler*/
+    if(env->eip == last_sched ) {
+      if(last_sched_time.tv_sec!=0) {
+        //At this point we're pretty sure we're in the actual scheduler
+        gettimeofday(&now, NULL);
 
-  xed_decoded_inst_zero(&insn_decoded);
-  xed_decoded_inst_set_mode(&insn_decoded, XED_MACHINE_MODE_LEGACY_32,
-                            XED_ADDRESS_WIDTH_32b);
-  xed_decode(&insn_decoded, (const xed_uint8_t *) insn, MAX_INSN_BYTES);
-  insn_len = xed_decoded_inst_get_length(&insn_decoded);
-  insn_len = insn_len > MAX_INSN_BYTES ? MAX_INSN_BYTES : insn_len;
+        timeval_subtract(&deltat, &now, &last_sched_time);
 
-  //iclass = xed_decoded_inst_get_iclass(&insn_decoded);
-
-  /*write to cr3
-  for movcr, mod=11 (register direct)
-  so move to cr3 would always have 1101 1XXX & d8 == 1*/
-  if(insn[0] ==  0x0f && insn[1] == 0x22 && ((insn[2] & 0xf8)==0xd8)) {
-    ops = xed_decoded_inst_operands(&insn_decoded);
-    sched_addr = find_function_header(env, env->eip);
-    fprintf(tracefile, "calling function: %x\n", sched_addr);
-
-
-    //We look to see if we've got this as the scheduler 5 times in a row
-    //If so, it probably is? Crap heurestic, but can't argue with results
-
-    if(sched_addr==last_sched)  {
-      if(found_sched_times<FIND_SCHED_THRES)  {
-        found_sched_times++;
+        if(deltat.tv_sec>largest_deltat.tv_sec) {
+          largest_deltat = deltat;
+          fprintf(tracefile, "largest deltat: %ld.%06ld\n", 
+                   largest_deltat.tv_sec, largest_deltat.tv_usec);
+          fflush(tracefile);
+        } else if(deltat.tv_sec==largest_deltat.tv_sec) {
+          if(deltat.tv_usec>largest_deltat.tv_usec) {
+            largest_deltat = deltat;
+            fprintf(tracefile, "largest deltat: %ld.%06ld\n", 
+                     largest_deltat.tv_sec, largest_deltat.tv_usec);
+            fflush(tracefile);
+          }
+        }
       }
-      found_sched_times=FIND_SCHED_THRES;//prevent overflow
-    } else{
-      if(found_sched_times<FIND_SCHED_THRES) {
+      gettimeofday(&last_sched_time, NULL);
+    }
+  } else { 
+    DECAF_read_mem(env, env->eip, MAX_INSN_BYTES, insn);
+
+    xed_decoded_inst_zero(&insn_decoded);
+    xed_decoded_inst_set_mode(&insn_decoded, XED_MACHINE_MODE_LEGACY_32,
+                              XED_ADDRESS_WIDTH_32b);
+    xed_decode(&insn_decoded, (const xed_uint8_t *) insn, MAX_INSN_BYTES);
+    insn_len = xed_decoded_inst_get_length(&insn_decoded);
+    insn_len = insn_len > MAX_INSN_BYTES ? MAX_INSN_BYTES : insn_len;
+
+    /*check for write to cr3
+    for movcr, mod=11 (register direct)
+    so move to cr3 would always have 1101 1XXX & d8 == 1*/
+    if(insn[0] ==  0x0f && insn[1] == 0x22 && ((insn[2] & 0xf8)==0xd8)) {
+
+      sched_addr = find_function_header(env, env->eip);
+      fprintf(tracefile, "calling function: %x\n", sched_addr);
+      DECAF_read_mem(env, sched_addr, sizeof(bytes), &bytes);
+      fprintf(tracefile, "read from %x: %x\n", sched_addr, bytes);
+
+      //We look to see if we've got this 5 times in a row
+      //If so, it is likely the scheduler.
+      if(sched_addr==last_sched)  {
+        found_sched_times++;
+      } else{
         found_sched_times=0;
         last_sched=sched_addr;
       }
-    }
-
-
-    DECAF_read_mem(env, sched_addr, sizeof(bytes), &bytes);
-    fprintf(tracefile, "read from %x: %x\n", sched_addr, bytes);
-    if(xed_decoded_inst_dump_att_format(&insn_decoded, outbuf, 255, 0)) {
-      outbuf[255]='\0'; 
-      fprintf(tracefile, "%x: %s\n", env->eip, outbuf);
-      fprintf(tracefile, "---\n");
-    }
-    fflush(tracefile);
-  }
-
-  /*Get monitoring threshhold by measuring largest gap from scheduler*/
-  if(env->eip == last_sched && found_sched_times==FIND_SCHED_THRES) {
-    if(last_sched_time.tv_sec!=0) {
-      //At this point we're pretty sure we're in the actual scheduler
-      gettimeofday(&now, NULL);
-
-      timeval_subtract(&deltat, &now, &last_sched_time);
-
-      if(deltat.tv_sec>largest_deltat.tv_sec) {
-        largest_deltat = deltat;
-      } else if(deltat.tv_sec==largest_deltat.tv_sec) {
-        if(deltat.tv_usec>largest_deltat.tv_usec) {
-          largest_deltat = deltat;
-        }
+      if(found_sched_times >= FIND_SCHED_THRES) {
+        found_sched = true;
+        fprintf(tracefile, "Found scheduler at %x!\n", last_sched);
       }
 
-      fprintf(tracefile, "largest deltat: %ld.%06ld\n", 
-             largest_deltat.tv_sec, largest_deltat.tv_usec);
+      if(xed_decoded_inst_dump_att_format(&insn_decoded, outbuf, 255, 0)) {
+        outbuf[255]='\0'; 
+        fprintf(tracefile, "%x: %s\n", env->eip, outbuf);
+        fprintf(tracefile, "---\n");
+      }
       fflush(tracefile);
     }
-    gettimeofday(&last_sched_time, NULL);
   }
-  
+
   return;
 }
 
@@ -200,6 +196,7 @@ static void start_tracing(void) {
   DECAF_stop_vm();
   get_next_instr = 0;
   found_sched_times = 0;
+  found_sched = 0;
   count = 0;
   largest_deltat.tv_sec = 0;
   largest_deltat.tv_usec = 0;
