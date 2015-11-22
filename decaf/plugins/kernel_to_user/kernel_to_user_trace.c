@@ -38,11 +38,15 @@ static void insn_end_callback(DECAF_Callback_Params* params) {
 
   /*CPL lower 3 bits of selector in CS*/
 	if((env->segs[R_CS].selector & 0x3)) {
+	//if(env->eip < 0xc0000000) {
     if(was_in_kernel) {
-      fprintf(tracefile, "%x:\n", oldeip);
+      fprintf(tracefile, "0->3 %x:\n", oldeip);
     }
     was_in_kernel=0;
   } else {
+    if(!was_in_kernel) {
+      fprintf(tracefile, "3->0 %x:\n", env->eip);
+    }
     was_in_kernel=1;
   } 
   oldeip=env->eip;
