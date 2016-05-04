@@ -29,8 +29,8 @@ extern void * cpu_single_env;
 extern int taint_keystroke_enabled;
 extern void DECAF_taint_keystroke(int keycode);
 extern void DECAF_keystroke_read(uint8_t taint_status);
-extern void DECAF_keystroke_place(int keycode);
 #endif /* CONFIG_TCG_TAINT */
+extern void DECAF_keystroke_place(int keycode);
 
 /* debug PC keyboard */
 //#define DEBUG_KBD
@@ -201,8 +201,8 @@ static void ps2_put_keycode_taint(void *opaque, int keycode)
  */
 static void ps2_put_keycode(void *opaque, int keycode)
 {
-#ifdef CONFIG_TCG_TAINT
 	DECAF_keystroke_place(keycode);
+#ifdef CONFIG_TCG_TAINT
 	if(taint_keystroke_enabled)
 	{
 		ps2_put_keycode_taint(opaque,keycode);
