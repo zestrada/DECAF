@@ -34,7 +34,9 @@
 #include "softmmu_exec.h"
 #endif /* !defined(CONFIG_USER_ONLY) */
 
-#include "../shared/DECAF_main.h"
+//#include "../shared/DECAF_main.h"
+#include "shared/DECAF_main_internal.h" // AWH
+#include "shared/DECAF_callback_to_QEMU.h"
 
 //#define DEBUG_PCALL
 
@@ -1322,6 +1324,10 @@ static void handle_even_inj(int intno, int is_int, int error_code,
 static void do_interrupt_all(int intno, int is_int, int error_code,
                              target_ulong next_eip, int is_hw)
 {
+    if(DECAF_is_callback_needed(DECAF_INTR_CB)) {
+      //Since this is at execution time, no need for a gen_helper
+      helper_DECAF_invoke_interrupt_callback(env, is_hw, intno);
+    }
     if (qemu_loglevel_mask(CPU_LOG_INT)) {
         if ((env->cr[0] & CR0_PE_MASK)) {
             static int count;

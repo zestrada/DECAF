@@ -1123,10 +1123,31 @@ void helper_DECAF_invoke_vmcall_callback(CPUState* env)
         static DECAF_Callback_Params params;
 
 	if (env == 0) return;
+  //printf("eax: %d\n",env->regs[R_EAX]);
 	params.ie.env = env;
 PUSH_ALL()
 	//FIXME: not thread safe
 	LIST_FOREACH_SAFE(cb_struct, &callback_list_heads[DECAF_VMCALL_CB], link,cb_temp) {
+		// If it is a global callback or it is within the execution context,
+		// invoke this callback
+	    params.cbhandle = (DECAF_Handle)cb_struct;
+		if(!cb_struct->enabled || *cb_struct->enabled)
+			cb_struct->callback(&params);
+	}
+POP_ALL()
+}
+
+void helper_DECAF_invoke_interrupt_callback(CPUState* env, int is_hw, int intno)
+{
+	static callback_struct_t *cb_struct, *cb_temp;
+        static DECAF_Callback_Params params;
+
+	params.it.env = env;
+	params.it.is_hw = is_hw;
+	params.it.intno = intno;
+PUSH_ALL()
+	//FIXME: not thread safe
+	LIST_FOREACH_SAFE(cb_struct, &callback_list_heads[DECAF_INTR_CB], link,cb_temp) {
 		// If it is a global callback or it is within the execution context,
 		// invoke this callback
 	    params.cbhandle = (DECAF_Handle)cb_struct;

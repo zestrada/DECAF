@@ -57,6 +57,7 @@ typedef enum {
         DECAF_READ_TAINTMEM_CB,
         DECAF_WRITE_TAINTMEM_CB,
         DECAF_VMCALL_CB,
+        DECAF_INTR_CB,
 #ifdef CONFIG_TCG_LLVM
 	DECAF_BLOCK_TRANS_CB,
 #endif /* CONFIG_TCG_LLVM */
@@ -195,6 +196,13 @@ typedef struct _DECAF_Read_Write_Mem
 	uint8_t *taint_info;
 }DECAF_Write_Taint_Mem;
 
+typedef struct _DECAF_INTR
+{
+	CPUState *env;
+  int is_hw;
+  int intno;
+}DECAF_INTR;
+
 #ifdef CONFIG_TCG_LLVM
 typedef struct _DECAF_Block_Trans_Params
 {
@@ -221,6 +229,7 @@ typedef struct _DECAF_Callback_Params
 		DECAF_Tlb_Exec_Params tx;
 		DECAF_Read_Taint_Mem rt;
 		DECAF_Write_Taint_Mem wt;
+		DECAF_INTR it;
 #ifdef CONFIG_TCG_LLVM
 		DECAF_Block_Trans_Params bt;
 #endif /* CONFIG_TCG_LLVM */
