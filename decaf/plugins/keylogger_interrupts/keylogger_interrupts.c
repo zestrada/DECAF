@@ -29,8 +29,11 @@ static DECAF_Handle interrupt_handle = DECAF_NULL_HANDLE;
 static char trace_filename[128];
 static FILE *tracefile;
 static uint32_t last_cr3 = 0x0;
-static int was_int;
+static int was_int, was_keystroke;
 static int use_sysenter = 0;
+static unsigned isrs_afterkeys[256], num_keystrokes;
+//Memory is cheap, let's do this fast with a 4MB array vs a dict:
+//static uint32_t cr3s[0xfffff] = {0};
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -38,7 +41,7 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static int keystroke_enabled = 1;
 
 //We'll print the last few calls after a keystroke
-#define MAXCALLS 20
+#define MAXCALLS 10
 static uint calls = MAXCALLS;
 
 void check_call(DECAF_Callback_Params *param) {
@@ -113,6 +116,12 @@ void block_begin_callback(DECAF_Callback_Params *param) {
     //fprintf(tracefile, "eip: %x:\n", address);
     was_int--;
   }
+  /*
+  cr3 = DECAF_getPGD(param->be.env);
+  if( cr3 != last_cr3) {
+    static uint32_t cr3s[cr3>>12]++;
+  }
+  */
   pthread_mutex_unlock(&mutex);
 }
 
@@ -204,6 +213,8 @@ static void keystroke_callback(DECAF_Callback_Params* params) {
   DECAF_printf("keystroke: %x\n", keycode);
   fprintf(tracefile, "keystroke: %x\n", keycode);
   calls = 0;
+  was_keystroke = 1;
+  num_keystrokes++;
   pthread_mutex_unlock(&mutex);
 }
 
@@ -219,21 +230,28 @@ static void interrupt_callback(DECAF_Callback_Params* params) {
   }
  
   intno = params->it.intno; 
-  if(params->it.is_hw)  {
-    env = params->it.env;
-    //Now get the ISR from the IDT
-    isr_address = env->idt.base + intno*8; //reusing this variable for the entry
-    DECAF_read_mem(env,isr_address,sizeof(gate_entry),&gate_entry);
-    isr_address = (gate_entry>>32ULL & 0xffff0000) | (gate_entry & 0x0000ffff);
-    fprintf(tracefile, "HW Interrupt: 0x%x, handler: 0x%x, "
-                       "sysenter_eip offset: 0x%x\n", intno, isr_address,
-                       isr_address-env->sysenter_eip);
-  }
   pthread_mutex_lock(&mutex);
+  if(params->it.is_hw)  {
+    //There was a keystroke in the virtual hardware before we got this interrupt
+    if(was_keystroke) {
+      env = params->it.env;
+      //Now get the ISR from the IDT
+      isr_address = env->idt.base + intno*8; //reusing this variable for the entry
+      DECAF_read_mem(env,isr_address,sizeof(gate_entry),&gate_entry);
+      isr_address = (gate_entry>>32ULL & 0xffff0000) | (gate_entry & 0x0000ffff);
+      fprintf(tracefile, "HW Interrupt: 0x%x, handler: 0x%x, "
+                         "sysenter_eip offset: 0x%x\n", intno, isr_address,
+                         isr_address-env->sysenter_eip);
+      isrs_afterkeys[intno]++;
+      was_keystroke = 0;
+    }
+  }
   was_int = MAXCALLS;
   pthread_mutex_unlock(&mutex);
 }
 static void stop_tracing(void) {
+  int i, intno=0;
+  unsigned max=0;
   DECAF_stop_vm();
 
   if(keystroke_handle != DECAF_NULL_HANDLE) {
@@ -255,11 +273,21 @@ static void stop_tracing(void) {
     DECAF_unregister_callback(DECAF_INTR_CB, interrupt_handle);
     interrupt_handle = DECAF_NULL_HANDLE;
   }
+
+  for(i=0;i<256;i++) {
+    if(isrs_afterkeys[i]>max) {
+      max=isrs_afterkeys[i];
+      intno=i;
+    }
+  }
+  fprintf(tracefile, "intno 0x%x seen after keystrokes %u times\n", intno, max);
+
   if(tracefile != NULL) {
     fclose(tracefile);
     tracefile=NULL;
   }
   DECAF_start_vm();
+
 }
 
 static void my_cleanup(void) {
@@ -273,6 +301,7 @@ static void my_cleanup(void) {
 } 
 
 static void start_tracing(void) {
+  int i;
   DECAF_stop_vm();
   /* start instruction tracing and initiliaze variables */
   if(trace_filename[0] == '\0') {
@@ -298,6 +327,10 @@ static void start_tracing(void) {
     block_begin_callback, NULL, INV_ADDR, INV_ADDR);
   interrupt_handle = DECAF_register_callback(DECAF_INTR_CB,
     interrupt_callback, NULL);
+  was_keystroke = 0;
+  for(i=0; i<256; i++)
+    isrs_afterkeys[i] = 0;
+  num_keystrokes = 0;
   DECAF_start_vm();
 }
 
