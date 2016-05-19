@@ -3,7 +3,7 @@
 #I start my qemu (from decaf/) with these arguments:
 # -chardev socket,id=monitor,path=./monitor.sock,server,nowait -monitor chardev:monitor 
 
-SOCKET=../../winmonitor.sock
+SOCKET=../../monitor.sock
 
 #Run a command in the qemu monitor
 mon_cmd() {

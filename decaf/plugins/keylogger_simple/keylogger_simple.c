@@ -35,10 +35,43 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static int keystroke_enabled = 1;
 
 //We'll print the last few calls after a keystroke
-#define MAXCALLS 5
+#define MAXCALLS 20
 static uint calls = MAXCALLS;
 
 void check_call(DECAF_Callback_Params *param) {
+  uint32_t eip, cr3, insn_buf;
+  CPUState *env = NULL;
+
+  //If we've gotten this far, params is not null
+  if(calls<MAXCALLS) {
+    env = param->be.env;
+    if(env!=NULL) {
+      eip=DECAF_getPC(env);
+      cr3=DECAF_getPGD(env);
+    } else {
+      eip=0x0;
+      cr3=0x0;
+    }
+
+    DECAF_printf("sysenter_eip: (0x%x)\n", env->sysenter_eip);
+    fprintf(tracefile, "sysenter_eip: (0x%x)\n", env->sysenter_eip);
+    fprintf(tracefile, "sysenter_esp: (0x%x)\n", env->sysenter_esp);
+    fprintf(tracefile, "current esp: (0x%x)\n", env->regs[R_ESP]-env->sysenter_eip);
+    //fprintf(tracefile, "idt base: (0x%x) \n", env->idt.base); 
+
+    //Read 32bits worth of code... will be used to identify this later
+    DECAF_read_mem(env,param->be.cur_pc,sizeof(uint32_t),&insn_buf);
+    DECAF_printf("call: (0x%x@0x%x) 0x%x\n", eip-env->sysenter_eip, cr3, insn_buf);
+    fprintf(tracefile, "call: (0x%x@0x%x) 0x%x\n", eip-env->sysenter_eip, cr3,
+            insn_buf);
+    fprintf(tracefile, "call (-esp): (0x%x@0x%x) 0x%x\n", eip-env->sysenter_esp, 
+            cr3, insn_buf);
+    calls++;
+  }
+}
+
+//Cheap copy+paste: do the same as calls, but don't print
+void check_ret(DECAF_Callback_Params *param) {
   uint32_t eip, cr3;
   CPUState *env = NULL;
 
@@ -52,20 +85,22 @@ void check_call(DECAF_Callback_Params *param) {
       eip=0x0;
       cr3=0x0;
     }
-    DECAF_printf("call: (0x%x@0x%x)\n", eip, cr3);
-    fprintf(tracefile, "call: (0x%x@0x%x)\n", eip, cr3);
-    calls++;
+
+    DECAF_printf("ret: (0x%x@0x%x)\n", eip-env->sysenter_eip, cr3);
+    fprintf(tracefile, "ret: (0x%x@0x%x)\n", eip-env->sysenter_eip, cr3);
   }
 }
 
-void check_ret(DECAF_Callback_Params *param) {
+void check_sysenter(DECAF_Callback_Params *param) {
+  fprintf(tracefile, "sysenter instruction: eax: 0x%x\n", 
+          param->be.env->regs[R_EAX]);
 }
 
 /*Taken and modified from the original keylogger example */
 void block_end_callback(DECAF_Callback_Params *param)
 {
 	unsigned char insn_buf[2];
-	int is_call = 0, is_ret = 0;
+	int is_call = 0, is_ret = 0, is_sysenter = 0;
 	int b, cpl;
   uint32_t cr3, eip;
 #ifdef CONFIG_VMI_ENABLE
@@ -73,6 +108,14 @@ void block_end_callback(DECAF_Callback_Params *param)
 	tmodinfo_t dm;// (tmodinfo_t *) malloc(sizeof(tmodinfo_t));
 #endif //CONFIG_VMI_ENABLE
 
+  /*
+  if(insn_end_handle != DECAF_NULL_HANDLE) {
+    DECAF_stop_vm();
+    DECAF_unregister_callback(DECAF_INSN_END_CB, insn_end_handle);
+    insn_end_handle = DECAF_NULL_HANDLE;
+    DECAF_start_vm();
+  }
+  */
   pthread_mutex_lock(&mutex);
 	DECAF_read_mem(param->be.env,param->be.cur_pc,sizeof(char)*2,insn_buf);
 
@@ -93,6 +136,11 @@ void block_end_callback(DECAF_Callback_Params *param)
 		case 0xcb:
 		is_ret = 1;
 		break;
+
+    case 0x0f:
+		if(insn_buf[1]==0x34)
+      is_sysenter = 1;
+    break;
 		default: break;
 	}
 
@@ -103,13 +151,17 @@ void block_end_callback(DECAF_Callback_Params *param)
     check_call(param); //TODO: clean up redundancies here
   else if (is_ret)
     check_ret(param);
+/*
+  else if (is_sysenter)
+    check_sysenter(param);
+*/
 
   cr3 = DECAF_getPGD(param->be.env);
   if( cr3 != last_cr3) {
     eip=DECAF_getPC(param->be.env);
     cpl=param->be.env->segs[R_CS].selector & 0x3;
-    DECAF_printf("New cr3: 0x%x\n", cr3);
-    fprintf(tracefile, "New cr3: 0x%x CPL: %d ", cr3, cpl);
+    DECAF_printf("BE - New cr3: 0x%x\n", cr3);
+    fprintf(tracefile, "BE - New cr3: 0x%x CPL: %d ", cr3, cpl);
 #ifdef CONFIG_VMI_ENABLE
     if(VMI_locate_module_c(eip,cr3, name, &dm) == -1)
     {
@@ -117,32 +169,13 @@ void block_end_callback(DECAF_Callback_Params *param)
       bzero(&dm, sizeof(dm));
     }
     name[127]= '\0';
-    fprintf(tracefile, "%s\n",name);
-#else
-    fprintf(tracefile, "\n");
+    fprintf(tracefile, "%s ",name);
 #endif //CONFIG_VMI_ENABLE
+    fprintf(tracefile, "eip: 0x%x\n", eip-param->be.env->sysenter_eip);
     fflush(tracefile);
     last_cr3 = cr3;
   }
 
-  pthread_mutex_unlock(&mutex);
-}
-
-
-static void keystroke_callback(DECAF_Callback_Params* params) {
-  pthread_mutex_lock(&mutex);
-  int keycode;
-
-	if(!params) {
-   DECAF_printf("Keystroke callback with NULL params!\n");
-   return;
-  }
-
-  //Not multi-thread safe since we're using the global cpu_single_env
-  keycode = params->ks.keycode;
-  DECAF_printf("keystroke: %x\n", keycode);
-  fprintf(tracefile, "keystroke: %x\n", keycode);
-  calls = 0;
   pthread_mutex_unlock(&mutex);
 }
 
@@ -155,9 +188,35 @@ static void insn_end_callback(DECAF_Callback_Params* params) {
     return;
   }
 
+  pthread_mutex_lock(&mutex);
+  fprintf(tracefile, "eip: 0x%x\n", env->eip);
+  fflush(tracefile);
+  pthread_mutex_unlock(&mutex);
   return;
 }
 
+static void keystroke_callback(DECAF_Callback_Params* params) {
+  int keycode;
+
+	if(!params) {
+   DECAF_printf("Keystroke callback with NULL params!\n");
+   return;
+  }
+
+  pthread_mutex_lock(&mutex);
+  //Not multi-thread safe since we're using the global cpu_single_env
+  keycode = params->ks.keycode;
+  DECAF_printf("keystroke: %x\n", keycode);
+  fprintf(tracefile, "keystroke: %x\n", keycode);
+  calls = 0;
+  pthread_mutex_unlock(&mutex);
+  /*
+  DECAF_stop_vm();
+  insn_end_handle = DECAF_register_callback(DECAF_INSN_END_CB,
+    insn_end_callback, NULL);
+  DECAF_start_vm();
+  */
+}
 static void stop_tracing(void) {
   DECAF_stop_vm();
   if(insn_end_handle != DECAF_NULL_HANDLE) {

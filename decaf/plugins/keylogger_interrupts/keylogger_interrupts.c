@@ -110,7 +110,7 @@ void block_begin_callback(DECAF_Callback_Params *param) {
     address = param->bb.env->eip;
     if(use_sysenter)
       address -= param->bb.env->sysenter_eip;
-    fprintf(tracefile, "eip: %x:\n", address);
+    //fprintf(tracefile, "eip: %x:\n", address);
     was_int--;
   }
   pthread_mutex_unlock(&mutex);
@@ -200,7 +200,6 @@ static void keystroke_callback(DECAF_Callback_Params* params) {
   }
 
   pthread_mutex_lock(&mutex);
-  //Not multi-thread safe since we're using the global cpu_single_env
   keycode = params->ks.keycode;
   DECAF_printf("keystroke: %x\n", keycode);
   fprintf(tracefile, "keystroke: %x\n", keycode);
@@ -224,7 +223,6 @@ static void interrupt_callback(DECAF_Callback_Params* params) {
     env = params->it.env;
     //Now get the ISR from the IDT
     isr_address = env->idt.base + intno*8; //reusing this variable for the entry
-    //offset = (e2 & 0xffff0000) | (e1 & 0x0000ffff);
     DECAF_read_mem(env,isr_address,sizeof(gate_entry),&gate_entry);
     isr_address = (gate_entry>>32ULL & 0xffff0000) | (gate_entry & 0x0000ffff);
     fprintf(tracefile, "HW Interrupt: 0x%x, handler: 0x%x, "
@@ -289,10 +287,10 @@ static void start_tracing(void) {
     return;
   }
   DECAF_printf("writing output to %s\n",trace_filename);
-  /*
-   *don't register these for now
   keystroke_handle = DECAF_register_callback(DECAF_KEYSTROKE_CB,
     keystroke_callback, &keystroke_enabled);
+  /*
+   *don't register these for now
   block_end_handle =  DECAF_registerOptimizedBlockEndCallback(
     block_end_callback, NULL, INV_ADDR, INV_ADDR);
   */
