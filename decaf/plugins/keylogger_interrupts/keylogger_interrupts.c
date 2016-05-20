@@ -6,6 +6,7 @@
 #include "utils/Output.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -20,6 +21,12 @@
  * detection
  */
 
+//CR3_TO_TRACK are the number of CR3 changes to track after each keypress
+#define CR3_TO_TRACK 10
+//Threshold is the percentage of interrupts of the identified intno to count a
+//process a expected after keystrokes
+#define THRESHOLD 90
+
 static plugin_interface_t my_interface;
 static DECAF_Handle vmcall_handle = DECAF_NULL_HANDLE;
 static DECAF_Handle keystroke_handle = DECAF_NULL_HANDLE;
@@ -32,8 +39,12 @@ static uint32_t last_cr3 = 0x0;
 static int was_int, was_keystroke;
 static int use_sysenter = 0;
 static unsigned isrs_afterkeys[256], num_keystrokes;
-//Memory is cheap, let's do this fast with a 4MB array vs a dict:
-//static uint32_t cr3s[0xfffff] = {0};
+//The array below is for tracking CR3s we see after a keystroke. 
+//FIXME: make this not insane
+//memory is cheap, let's do this fast with a 4MB array vs a dict:
+#define NUM_CR3S 0xfffff
+static unsigned cr3_changes;
+static uint32_t cr3s[NUM_CR3S] = {0}, cr3s_this_keystroke[CR3_TO_TRACK] = {0};
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -103,12 +114,15 @@ void check_sysenter(DECAF_Callback_Params *param) {
 }
 
 void block_begin_callback(DECAF_Callback_Params *param) {
-  uint32_t address;
+  //uint32_t address;
+  uint32_t cr3;
+  int i, found_cr3=0;
   if(param==NULL) {
     DECAF_printf("Null params!\n");
     return;
   }
   pthread_mutex_lock(&mutex);
+  /*
   if(was_int) {
     address = param->bb.env->eip;
     if(use_sysenter)
@@ -116,12 +130,25 @@ void block_begin_callback(DECAF_Callback_Params *param) {
     //fprintf(tracefile, "eip: %x:\n", address);
     was_int--;
   }
-  /*
-  cr3 = DECAF_getPGD(param->be.env);
-  if( cr3 != last_cr3) {
-    static uint32_t cr3s[cr3>>12]++;
-  }
   */
+
+  cr3 = DECAF_getPGD(param->be.env);
+  if(cr3_changes < CR3_TO_TRACK && cr3 != last_cr3) {
+    for(i=0;i<CR3_TO_TRACK;i++) {
+      if(cr3s_this_keystroke[i]==cr3) {
+        found_cr3=1;
+        break;
+      }
+    }
+    //Only increment our global list if this change is unique to the keystroke
+    //We are trying to correlate how many CR3s consistently show up
+    if(!found_cr3) {
+      cr3s_this_keystroke[cr3_changes]=cr3;
+      cr3s[cr3>>12]++;
+    }
+    cr3_changes++;
+    last_cr3 = cr3;
+  }
   pthread_mutex_unlock(&mutex);
 }
 
@@ -210,11 +237,16 @@ static void keystroke_callback(DECAF_Callback_Params* params) {
 
   pthread_mutex_lock(&mutex);
   keycode = params->ks.keycode;
+  /*
   DECAF_printf("keystroke: %x\n", keycode);
   fprintf(tracefile, "keystroke: %x\n", keycode);
-  calls = 0;
+  */
   was_keystroke = 1;
   num_keystrokes++;
+
+  //Reset state so we can grab the next 10 CR3 changes
+  cr3_changes = 0;
+  memset(cr3s_this_keystroke, 0, sizeof(cr3s_this_keystroke));
   pthread_mutex_unlock(&mutex);
 }
 
@@ -239,19 +271,36 @@ static void interrupt_callback(DECAF_Callback_Params* params) {
       isr_address = env->idt.base + intno*8; //reusing this variable for the entry
       DECAF_read_mem(env,isr_address,sizeof(gate_entry),&gate_entry);
       isr_address = (gate_entry>>32ULL & 0xffff0000) | (gate_entry & 0x0000ffff);
+      /*
       fprintf(tracefile, "HW Interrupt: 0x%x, handler: 0x%x, "
                          "sysenter_eip offset: 0x%x\n", intno, isr_address,
                          isr_address-env->sysenter_eip);
+      */
       isrs_afterkeys[intno]++;
       was_keystroke = 0;
     }
   }
-  was_int = MAXCALLS;
+  was_int = CR3_TO_TRACK;
   pthread_mutex_unlock(&mutex);
 }
+
+//Now this is getting out of hand
+struct max_cr3_struct {
+  uint32_t cr3;
+  unsigned count;
+  size_t position;
+};
+
+static int compare(const void *p1, const void *p2) {
+  return ((struct max_cr3_struct *)p1)->count - ((struct max_cr3_struct *)p2)->count;
+}
+
 static void stop_tracing(void) {
-  int i, intno=0;
+  int intno=0;
+  uint32_t min_cr3=0;
+  size_t i, j, min_index=0;
   unsigned max=0;
+  struct max_cr3_struct max_cr3s[CR3_TO_TRACK] = {{0}};
   DECAF_stop_vm();
 
   if(keystroke_handle != DECAF_NULL_HANDLE) {
@@ -274,6 +323,7 @@ static void stop_tracing(void) {
     interrupt_handle = DECAF_NULL_HANDLE;
   }
 
+  //Handle some fairly expensive cleanup
   for(i=0;i<256;i++) {
     if(isrs_afterkeys[i]>max) {
       max=isrs_afterkeys[i];
@@ -281,12 +331,40 @@ static void stop_tracing(void) {
     }
   }
   fprintf(tracefile, "intno 0x%x seen after keystrokes %u times\n", intno, max);
+  fprintf(tracefile, "total keystrokes: %u\n", num_keystrokes);
+
+  for(i=0;i<NUM_CR3S;i++) {
+    if(unlikely(cr3s[i] > min_cr3)) {
+      //Using min_index to avoid reshuffling these arrays all the
+      //time not sure if it actually helps
+      max_cr3s[min_index].count = cr3s[i]; //How many times this cr3 was seen
+      max_cr3s[min_index].cr3 = i;//The actual CR3 value
+      //Find a new minimum to push out next
+      for(j=0;j<CR3_TO_TRACK;j++) {
+        if(max_cr3s[j].count<max_cr3s[min_index].count)
+          min_index = j;
+      }
+      min_cr3 = max_cr3s[min_index].count;
+    }
+  }
+
+  qsort(max_cr3s, CR3_TO_TRACK, sizeof(struct max_cr3_struct), compare);
+
+  j=0;//now using j to store the number of CR3s we expect after an int intno
+  for(i=0;i<CR3_TO_TRACK;i++) {
+    //Test to see if this CR3 was seen after at least THRESHOLD keystrokes
+    if( ((max_cr3s[i].count*100)/max) >= THRESHOLD )
+      j++;
+    fprintf(tracefile, "count: %u, CR3: 0x%x \n", max_cr3s[i].count, 
+                       max_cr3s[i].cr3<<12);
+  }
+  fprintf(tracefile, "Processes expected after int 0x%x: %d\n", intno, j);
 
   if(tracefile != NULL) {
     fclose(tracefile);
     tracefile=NULL;
   }
-  DECAF_start_vm();
+  DECAF_start_vm();//CONSIDER MOVING THIS UP IF POST-PROCESSING CAUSES PROBLEMS
 
 }
 
@@ -331,6 +409,7 @@ static void start_tracing(void) {
   for(i=0; i<256; i++)
     isrs_afterkeys[i] = 0;
   num_keystrokes = 0;
+  cr3_changes = CR3_TO_TRACK;//We clear this on a keystroke to track them
   DECAF_start_vm();
 }
 
