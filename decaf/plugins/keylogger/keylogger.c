@@ -123,7 +123,9 @@ void do_read_taint_mem(DECAF_Callback_Params *param)
 {
 	uint32_t eip=DECAF_getPC(cpu_single_env);
 	uint32_t cr3= DECAF_getPGD(cpu_single_env);
+	uint32_t eip_phys= DECAF_get_phys_addr(cpu_single_env, eip);
   uint64_t value = 0;
+  uint64_t insns = 0;
 	char name[128];
 	tmodinfo_t dm;// (tmodinfo_t *) malloc(sizeof(tmodinfo_t));
 	if(VMI_locate_module_c(eip,cr3, name, &dm) == -1)
@@ -144,14 +146,16 @@ void do_read_taint_mem(DECAF_Callback_Params *param)
 		memset(modname_t, 0, 512);
 		memset(func_name_t, 0, 512);
 	}
-  if(cpu_single_env != NULL)
+  if(cpu_single_env != NULL) {
     DECAF_read_mem(cpu_single_env, param->rt.vaddr, param->rt.size, &value);
+    DECAF_read_mem(cpu_single_env, eip, sizeof(insns), &insns);
+  }
 	if(param->rt.size <=4)
-		fprintf(keylogger_log,"%s   \t 0 \t 0x%08x \t\t 0x%08x \t %d      0x%08x  0x%08x %15s    \t%s\t%s \t 0x%08lx\n",
-			name, param->rt.vaddr, param->rt.paddr, param->rt.size,*((uint32_t *)param->rt.taint_info), eip, dm.name,modname_t,func_name_t, value);
+		fprintf(keylogger_log,"%s   \t 0 \t 0x%08x \t\t 0x%08x \t %d      0x%08x  0x%08x %15s    \t%s\t%s \t 0x%08lx \t 0x%16lx \t 0x%08x\n",
+			name, param->rt.vaddr, param->rt.paddr, param->rt.size,*((uint32_t *)param->rt.taint_info), eip, dm.name,modname_t,func_name_t, value, insns, eip_phys);
 	else
-		fprintf(keylogger_log,"%s   \t 0 \t 0x%08x \t\t 0x%08x \t %d      0x%16x  0x%08x %15s     \t%s\t%s \t 0x%16lx\n",
-					name, param->rt.vaddr, param->rt.paddr, param->rt.size,*((uint32_t *)param->rt.taint_info), eip, dm.name,  modname_t,func_name_t, value);
+		fprintf(keylogger_log,"%s   \t 0 \t 0x%08x \t\t 0x%08x \t %d      0x%16x  0x%08x %15s     \t%s\t%s \t 0x%16lx \t 0x%16lx \t 0x%08x\n",
+					name, param->rt.vaddr, param->rt.paddr, param->rt.size,*((uint32_t *)param->rt.taint_info), eip, dm.name,  modname_t,func_name_t, value, insns, eip_phys);
 
 
 }
@@ -160,8 +164,10 @@ void do_read_taint_mem(DECAF_Callback_Params *param)
 void do_write_taint_mem(DECAF_Callback_Params *param)
 {
 	uint32_t eip= DECAF_getPC(cpu_single_env);
+  uint32_t eip_phys= DECAF_get_phys_addr(cpu_single_env, eip);
 	uint32_t cr3= DECAF_getPGD(cpu_single_env);
   uint64_t value = 0;
+  uint64_t insns = 0;
 	char name[128];
 	tmodinfo_t  dm;// (tmodinfo_t *) malloc(sizeof(tmodinfo_t));
 	if(VMI_locate_module_c(eip,cr3, name, &dm) == -1)
@@ -186,14 +192,17 @@ void do_write_taint_mem(DECAF_Callback_Params *param)
 
 	//fprintf(keylogger_log,"%s    1  0x%08x  0x%08x  %d   0x%08x %s   0x%08x  %d    %s\n",
 	//		name, param->rt.vaddr, param->rt.paddr, param->rt.size, eip, dm->name, dm->base, dm->size, dm->fullname);
-  if(cpu_single_env != NULL)
+
+  if(cpu_single_env != NULL) {
     DECAF_read_mem(cpu_single_env, param->rt.vaddr, param->rt.size, &value);
+    DECAF_read_mem(cpu_single_env, eip, sizeof(insns), &insns);
+  }
 	if(param->rt.size <=4)
-		fprintf(keylogger_log,"%s   \t 1 \t 0x%08x \t\t 0x%08x \t %d      0x%08x  0x%08x %15s    \t%s\t%s \t 0x%08lx\n",
-			name, param->rt.vaddr, param->rt.paddr, param->rt.size,*((uint32_t *)param->rt.taint_info), eip, dm.name,modname_t,func_name_t, value);
+		fprintf(keylogger_log,"%s   \t 1 \t 0x%08x \t\t 0x%08x \t %d      0x%08x  0x%08x %15s    \t%s\t%s \t 0x%08lx \t 0x%16lx \t 0x%08x\n",
+			name, param->rt.vaddr, param->rt.paddr, param->rt.size,*((uint32_t *)param->rt.taint_info), eip, dm.name,modname_t,func_name_t, value, insns, eip_phys);
 	else
-		fprintf(keylogger_log,"%s   \t 1 \t 0x%08x \t\t 0x%08x \t %d      0x%16x  0x%08x %15s     \t%s\t%s \t 0x%16lx\n",
-					name, param->rt.vaddr, param->rt.paddr, param->rt.size,*((uint32_t *)param->rt.taint_info), eip, dm.name,  modname_t,func_name_t, value);
+		fprintf(keylogger_log,"%s   \t 1 \t 0x%08x \t\t 0x%08x \t %d      0x%16x  0x%08x %15s     \t%s\t%s \t 0x%16lx \t 0x%16lx \t 0x%08x\n",
+					name, param->rt.vaddr, param->rt.paddr, param->rt.size,*((uint32_t *)param->rt.taint_info), eip, dm.name,  modname_t,func_name_t, value, insns, eip_phys);
 /*
 			fprintf(keylogger_log,"%s   \t 1 \t 0x%08x \t\t 0x%08x \t %d      0x%08x  0x%08x %15s   \t%s\t%s\n",
 				name, param->rt.vaddr, param->rt.paddr, param->rt.size,*((uint32_t *)param->rt.taint_info), eip, dm.name,modname_t,func_name_t);
@@ -261,7 +270,7 @@ void do_enable_keylogger_check( Monitor *mon, const QDict *qdict)
 	}
 	fprintf(keylogger_log,"Process Read(0)/Write(1) vaddOfTaintedMem   paddrOfTaintedMem    Size   "
 			"TaintInfo   CurEIP \t ModuleName   \t CallerModuleName \t CallerSystemCall "
-      "\t valueOfTaintedMem\n");
+      "\t valueOfTaintedMem \t insnsAtEIP \t paddrOfEIP\n");
 	if(!handle_read_taint_mem)
 		handle_read_taint_mem = DECAF_register_callback(DECAF_READ_TAINTMEM_CB,do_read_taint_mem,NULL);
 	if(!handle_write_taint_mem)

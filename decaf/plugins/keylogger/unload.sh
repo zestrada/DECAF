@@ -10,5 +10,5 @@ mon_cmd() {
   echo $1 | nc -U $SOCKET
 }
 
-mon_vmd 'disable_keylogger_check'
+mon_cmd 'disable_keylogger_check'
 mon_cmd 'unload_plugin'
